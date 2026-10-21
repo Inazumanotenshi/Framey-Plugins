@@ -1,6 +1,6 @@
 # SteamGridDB Plugin for Steam Frame (Framey Plugin Loader)
 
-<img width="256" height="256" alt="steamgriddb-framey" src="https://github.com/user-attachments/assets/c664cb27-61a0-4273-84f3-5009cfb05e34" />
+<img width="256" height="256" alt="steamgriddb-framey" src="https://github.com/user-attachments/assets/c664cb27-61a0-4273-84f3-5009cfb05e34" align="center"/>
 
 A modified version of the popular [SteamGridDB](https://www.steamgriddb.com/) plugin, specifically tailored for the **Framey Plugin Loader** on the **Steam Frame**.
 
