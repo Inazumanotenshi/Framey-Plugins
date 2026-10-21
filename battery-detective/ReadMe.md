@@ -1,5 +1,7 @@
 # Battery Detective for Framey (unofficial)
 
+<img width="256" height="256" alt="battery-detective" src="https://github.com/user-attachments/assets/2da3c098-fe01-4506-a39b-52a0b775d3b5" align="center"/>
+
 Shows how much battery each game consumes. Includes a live display with an estimated remaining runtime, a usage trend graph for the last hour, and a ranking list showing consumption per game (%/h, average wattage, and estimated playtime on a full charge).
 
 ## Installation
