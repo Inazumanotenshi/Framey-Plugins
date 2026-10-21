@@ -48,5 +48,4 @@ To use the plugin, you need a personal API key from SteamGridDB:
 * Thanks to the creators of the **Framey Plugin Loader**.
 
 ## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
+eh...
