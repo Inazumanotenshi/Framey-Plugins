@@ -20,7 +20,7 @@ Some Plugin Code might be AI generated. If you dont like it dont use it!
 
 | Plugin | Description |
 |----------|----------|
-| Battery Detective | Tracks battery usage per game, estimates remaining playtime, and records battery statistics. |
+| Battery Detective | Tracks battery usage per game, estimates remaining playtime, and records battery statistics |
 | SteamGridDB Framey | Allows to change the artworks of your installed Steam Frame apps with artworks of SteamGridDB |
 | More coming soon... | 🚧 |
 
