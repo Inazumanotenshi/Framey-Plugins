@@ -20,6 +20,7 @@ UA = "framey-steamgriddb/0.1"
 MAX_JSON = 2 * 1024 * 1024
 MAX_IMG = 6 * 1024 * 1024
 MAX_THUMB = 400 * 1024
+MAX_LIVE = 3 * 1024 * 1024   # bigger images take the file route: the loader has little memory
 TIMEOUT = 15   # per socket operation
 TOTAL = 45     # per call, seen from the event loop
 EXTS = ("png", "jpg", "jpeg", "webp", "ico")
@@ -280,6 +281,15 @@ def _reset(appid, kind):
     return {"ok": True}
 
 
+def _fetch(url):
+    """Image as base64 for Steam's own set-artwork call (instant refresh, no file written here)."""
+    data = _get(url, {"User-Agent": UA}, MAX_LIVE)
+    ext = _sniff(data)
+    if ext not in ("png", "jpg"):
+        raise _Err("bad_image")
+    return {"data": base64.b64encode(data).decode("ascii"), "ext": ext}
+
+
 def _thumb(url):
     data = _get(url, {"User-Agent": UA}, MAX_THUMB)
     ext = _sniff(data)
@@ -328,6 +338,11 @@ async def call(method, arg):
             if not (isinstance(url, str) and _host_ok(url)):
                 raise _Err("bad_url")
             return await _run(_apply, appid, kind, url)
+        if method == "fetch":
+            url = arg.get("url") if isinstance(arg, dict) else None
+            if not (isinstance(url, str) and _host_ok(url)):
+                raise _Err("bad_url")
+            return await _run(_fetch, url)
         if method == "reset":
             appid, kind = _target(arg)
             return await _run(_reset, appid, kind)

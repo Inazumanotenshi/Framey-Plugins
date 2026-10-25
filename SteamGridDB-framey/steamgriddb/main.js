@@ -13,7 +13,7 @@ const LANGS = {
     keyPh: "Paste API key", keySave: "Save", keyChange: "Change API key",
     keyFile: "If typing does not work here: save the key over SSH to ~/.config/framey/steamgriddb.json as {\"api_key\": \"...\"}.",
     loading: "Loading …", more: "Load more", empty: "No images found.", applying: "Applying …",
-    done: "Applied. If it does not show up right away, reload Steam or the library.", failed: "Failed: ",
+    done: "Applied, but Steam may only show it after restarting SteamVR (instant refresh unavailable).", doneLive: "Applied and refreshed right away.", diagBtn: "Check Steam interface", diagHint: "Shows whether instant artwork refresh is available. Handy for bug reports.", failed: "Failed: ",
     reset: "Remove custom artwork", resetDone: "Reset.", custom: "Custom artwork active",
     kinds: { grid_p: "Portrait", grid_w: "Wide", hero: "Hero", logo: "Logo", icon: "Icon" },
     err: {
@@ -31,7 +31,7 @@ const LANGS = {
     keyPh: "API-Key einfügen", keySave: "Speichern", keyChange: "API-Key ändern",
     keyFile: "Falls die Eingabe hier nicht geht: Key per SSH in ~/.config/framey/steamgriddb.json als {\"api_key\": \"...\"} speichern.",
     loading: "Lade …", more: "Mehr laden", empty: "Keine Bilder gefunden.", applying: "Wird gesetzt …",
-    done: "Gesetzt. Falls es nicht sofort erscheint: Steam bzw. die Bibliothek neu laden.", failed: "Fehlgeschlagen: ",
+    done: "Gesetzt. Steam zeigt es eventuell erst nach einem SteamVR-Neustart (Sofort-Aktualisierung nicht verfügbar).", doneLive: "Gesetzt und sofort aktualisiert.", diagBtn: "Steam-Schnittstelle prüfen", diagHint: "Zeigt, ob die Sofort-Aktualisierung verfügbar ist. Nützlich für Fehlerberichte.", failed: "Fehlgeschlagen: ",
     reset: "Eigenes Artwork entfernen", resetDone: "Zurückgesetzt.", custom: "Eigenes Artwork aktiv",
     kinds: { grid_p: "Cover hoch", grid_w: "Cover breit", hero: "Hero", logo: "Logo", icon: "Icon" },
     err: {
@@ -49,7 +49,7 @@ const LANGS = {
     keyPh: "Coller la clé API", keySave: "Enregistrer", keyChange: "Changer la clé API",
     keyFile: "Si la saisie ne fonctionne pas ici : enregistrez la clé via SSH dans ~/.config/framey/steamgriddb.json sous la forme {\"api_key\": \"...\"}.",
     loading: "Chargement …", more: "Charger plus", empty: "Aucune image trouvée.", applying: "Application …",
-    done: "Appliqué. S'il n'apparaît pas tout de suite, rechargez Steam ou la bibliothèque.", failed: "Échec : ",
+    done: "Appliqué, mais Steam ne l'affichera peut-être qu'après un redémarrage de SteamVR (actualisation immédiate indisponible).", doneLive: "Appliqué et actualisé immédiatement.", diagBtn: "Vérifier l'interface Steam", diagHint: "Indique si l'actualisation immédiate est disponible. Utile pour les rapports de bug.", failed: "Échec : ",
     reset: "Supprimer l'illustration personnalisée", resetDone: "Réinitialisé.", custom: "Illustration personnalisée active",
     kinds: { grid_p: "Portrait", grid_w: "Large", hero: "Hero", logo: "Logo", icon: "Icône" },
     err: {
@@ -67,7 +67,7 @@ const LANGS = {
     keyPh: "Pegar clave de API", keySave: "Guardar", keyChange: "Cambiar clave de API",
     keyFile: "Si aquí no se puede escribir: guarda la clave por SSH en ~/.config/framey/steamgriddb.json como {\"api_key\": \"...\"}.",
     loading: "Cargando …", more: "Cargar más", empty: "No se encontraron imágenes.", applying: "Aplicando …",
-    done: "Aplicado. Si no aparece enseguida, recarga Steam o la biblioteca.", failed: "Error: ",
+    done: "Aplicado, pero Steam quizá solo lo muestre tras reiniciar SteamVR (actualización instantánea no disponible).", doneLive: "Aplicado y actualizado al instante.", diagBtn: "Comprobar la interfaz de Steam", diagHint: "Muestra si la actualización instantánea está disponible. Útil para informes de errores.", failed: "Error: ",
     reset: "Quitar arte personalizado", resetDone: "Restablecido.", custom: "Arte personalizado activo",
     kinds: { grid_p: "Vertical", grid_w: "Horizontal", hero: "Hero", logo: "Logo", icon: "Icono" },
     err: {
@@ -85,7 +85,7 @@ const LANGS = {
     keyPh: "Incolla la chiave API", keySave: "Salva", keyChange: "Cambia chiave API",
     keyFile: "Se qui non puoi digitare: salva la chiave via SSH in ~/.config/framey/steamgriddb.json come {\"api_key\": \"...\"}.",
     loading: "Caricamento …", more: "Carica altro", empty: "Nessuna immagine trovata.", applying: "Applicazione …",
-    done: "Applicato. Se non compare subito, ricarica Steam o la libreria.", failed: "Errore: ",
+    done: "Applicato, ma Steam potrebbe mostrarlo solo dopo il riavvio di SteamVR (aggiornamento immediato non disponibile).", doneLive: "Applicato e aggiornato subito.", diagBtn: "Controlla l'interfaccia di Steam", diagHint: "Mostra se l'aggiornamento immediato è disponibile. Utile per segnalare errori.", failed: "Errore: ",
     reset: "Rimuovi artwork personalizzato", resetDone: "Ripristinato.", custom: "Artwork personalizzato attivo",
     kinds: { grid_p: "Verticale", grid_w: "Orizzontale", hero: "Hero", logo: "Logo", icon: "Icona" },
     err: {
@@ -103,7 +103,7 @@ const LANGS = {
     keyPh: "Colar chave de API", keySave: "Salvar", keyChange: "Alterar chave de API",
     keyFile: "Se não for possível digitar aqui: salve a chave via SSH em ~/.config/framey/steamgriddb.json como {\"api_key\": \"...\"}.",
     loading: "Carregando …", more: "Carregar mais", empty: "Nenhuma imagem encontrada.", applying: "Aplicando …",
-    done: "Aplicado. Se não aparecer logo, recarregue o Steam ou a biblioteca.", failed: "Falha: ",
+    done: "Aplicado, mas o Steam talvez só mostre após reiniciar o SteamVR (atualização imediata indisponível).", doneLive: "Aplicado e atualizado na hora.", diagBtn: "Verificar a interface do Steam", diagHint: "Mostra se a atualização imediata está disponível. Útil para relatar erros.", failed: "Falha: ",
     reset: "Remover arte personalizada", resetDone: "Redefinido.", custom: "Arte personalizada ativa",
     kinds: { grid_p: "Vertical", grid_w: "Horizontal", hero: "Hero", logo: "Logo", icon: "Ícone" },
     err: {
@@ -138,7 +138,7 @@ const SIZE = { grid_p: [150, 225], grid_w: [270, 128], hero: [340, 110], logo: [
 const st = {
   status: null, games: null, loading: false, homeErr: "", editKey: false,
   appid: null, name: "", kind: "grid_p", items: null, page: 0, more: false,
-  has: {}, busy: false, req: 0, listErr: "",
+  has: {}, busy: false, req: 0, listErr: "", diag: null,
 };
 let root = null;
 
@@ -256,6 +256,14 @@ function homeView() {
     }));
   });
   w.appendChild(langs);
+
+  w.appendChild(Framey.el("font-size:26px;font-weight:600;margin:18px 0 6px;", S.diagBtn));
+  w.appendChild(Framey.el("font-size:17px;color:#7d8791;", S.diagHint));
+  w.appendChild(Framey.button(S.diagBtn, BTN_DIM, function () { st.diag = steamDiag(); draw(); }));
+  if (st.diag) {
+    w.appendChild(Framey.el("font-family:monospace;font-size:15px;white-space:pre-wrap;word-break:break-all;background:#14181c;padding:10px;border-radius:8px;color:#c4ccd3;",
+      JSON.stringify(st.diag, null, 1)));
+  }
   return w;
 }
 
@@ -300,20 +308,75 @@ function loadItems() {
   });
 }
 
+// ---- applying artwork -----------------------------------------------------
+// Steam's own call (the one Decky uses) sets artwork and refreshes the UI at once. Asset types
+// follow Steam's grid file order: portrait 0, hero 1, logo 2, wide 3, icon 4.
+// If the call is missing or fails, the image is written into the grid folder as a fallback
+// (Steam then shows it after a restart).
+const STEAM_TYPE = { grid_p: 0, hero: 1, logo: 2, grid_w: 3, icon: 4 };
+
+function steamApps() {
+  try { return (window.SteamClient && window.SteamClient.Apps) || null; } catch (e) { return null; }
+}
+function attempt(fn, ms) {
+  return Promise.race([
+    new Promise(function (res) { res(fn()); }),
+    new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, ms); }),
+  ]);
+}
+function steamDiag() {
+  const d = { steamClient: false, apps: false, setArtwork: false, clearArtwork: false, related: [] };
+  try {
+    const sc = window.SteamClient;
+    const a = sc && sc.Apps;
+    d.steamClient = !!sc;
+    d.apps = !!a;
+    if (a) {
+      d.setArtwork = typeof a.SetCustomArtworkForApp === "function";
+      d.clearArtwork = typeof a.ClearCustomArtworkForApp === "function";
+      for (const k in a) { if (/artwork|custom|image|asset|icon/i.test(k) && d.related.length < 20) d.related.push(k); }
+    }
+  } catch (e) { d.error = String((e && e.message) || e); }
+  return d;
+}
+
 function applyItem(it) {
   if (st.busy) return;
   st.busy = true;
   Framey.toast(S.applying, 1500);
-  const kind = st.kind;
-  api("apply", { appid: st.appid, kind: kind, url: it.url }).then(function () {
+  const kind = st.kind, appid = st.appid;
+  const apps = steamApps();
+  const viaFile = function () {
+    return api("apply", { appid: appid, kind: kind, url: it.url }).then(function () { Framey.toast(S.done, 6000); });
+  };
+  let job;
+  if (apps && typeof apps.SetCustomArtworkForApp === "function") {
+    job = api("fetch", { url: it.url }).then(function (r) {
+      return attempt(function () {
+        return apps.SetCustomArtworkForApp(Number(appid), r.data, r.ext, STEAM_TYPE[kind]);
+      }, 20000);
+    }).then(function () {
+      Framey.toast(S.doneLive, 4000);
+    }).catch(viaFile);
+  } else {
+    job = viaFile();
+  }
+  job.then(function () {
     st.has[kind] = true;
-    Framey.toast(S.done, 5000);
   }).catch(function (e) {
     Framey.toast(S.failed + errText(e), 5000);
   }).then(function () {
     st.busy = false;
     draw();
   });
+}
+
+function resetItem(appid, kind) {
+  const apps = steamApps();
+  const live = apps && typeof apps.ClearCustomArtworkForApp === "function"
+    ? attempt(function () { return apps.ClearCustomArtworkForApp(Number(appid), STEAM_TYPE[kind]); }, 10000).catch(function () {})
+    : Promise.resolve();
+  return live.then(function () { return api("reset", { appid: appid, kind: kind }); });
 }
 
 function tile(it) {
@@ -359,7 +422,7 @@ function detailView() {
     const bar = Framey.el("display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:8px 0;", "");
     bar.appendChild(Framey.el("font-size:20px;color:#7fd18b;", S.custom));
     bar.appendChild(Framey.button(S.reset, BTN_DIM, function () {
-      api("reset", { appid: st.appid, kind: st.kind }).then(function () {
+      resetItem(st.appid, st.kind).then(function () {
         st.has[st.kind] = false;
         Framey.toast(S.resetDone, 2500);
         draw();
