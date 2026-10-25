@@ -138,7 +138,7 @@ const SIZE = { grid_p: [150, 225], grid_w: [270, 128], hero: [340, 110], logo: [
 const st = {
   status: null, games: null, loading: false, homeErr: "", editKey: false,
   appid: null, name: "", kind: "grid_p", items: null, page: 0, more: false,
-  has: {}, busy: false, req: 0, listErr: "", diag: null,
+  has: {}, busy: false, req: 0, listErr: "", diag: null, why: null,
 };
 let root = null;
 
@@ -259,7 +259,22 @@ function homeView() {
 
   w.appendChild(Framey.el("font-size:26px;font-weight:600;margin:18px 0 6px;", S.diagBtn));
   w.appendChild(Framey.el("font-size:17px;color:#7d8791;", S.diagHint));
-  w.appendChild(Framey.button(S.diagBtn, BTN_DIM, function () { st.diag = steamDiag(); draw(); }));
+  w.appendChild(Framey.button(S.diagBtn, BTN_DIM, function () {
+    const d = steamDiag();
+    d.lastFallbackReason = st.why || null;
+    st.diag = d;
+    draw();
+    api("targets").then(function (r) {
+      d.ports = (r && r.ports) || [];
+      d.pages = ((r && r.targets) || []).map(function (t) { return t.port + " | " + t.title + " | " + t.url + (t.ws ? "" : " | no-ws"); });
+    })
+      .catch(function (e) { d.pages = String((e && e.message) || e); })
+      .then(function () {
+        return api("cdp_probe").then(function (r) { d.cdp = r; })
+          .catch(function (e) { d.cdp = String((e && e.message) || e); });
+      })
+      .then(function () { if (root && !st.appid) draw(); });
+  }));
   if (st.diag) {
     w.appendChild(Framey.el("font-family:monospace;font-size:15px;white-space:pre-wrap;word-break:break-all;background:#14181c;padding:10px;border-radius:8px;color:#c4ccd3;",
       JSON.stringify(st.diag, null, 1)));
@@ -337,6 +352,13 @@ function steamDiag() {
       for (const k in a) { if (/artwork|custom|image|asset|icon/i.test(k) && d.related.length < 20) d.related.push(k); }
     }
   } catch (e) { d.error = String((e && e.message) || e); }
+  try {
+    const sc = window.SteamClient;
+    if (sc) { d.clientKeys = []; for (const k in sc) { if (d.clientKeys.length < 40) d.clientKeys.push(k); } }
+    d.globals = [];
+    for (const k in window) { if (/store|library|artwork|overview/i.test(k) && d.globals.length < 25) d.globals.push(k); }
+    d.page = String(document.title || "").slice(0, 60) + " | " + String(location.href || "").slice(0, 100);
+  } catch (e) { d.error2 = String((e && e.message) || e); }
   return d;
 }
 
@@ -357,9 +379,19 @@ function applyItem(it) {
       }, 20000);
     }).then(function () {
       Framey.toast(S.doneLive, 4000);
-    }).catch(viaFile);
+    }).catch(function (e) {
+      st.why = String((e && e.message) || e);
+      return viaFile();
+    });
   } else {
-    job = viaFile();
+    // This page (SteamVR's) has no SteamClient.Apps: let the backend call it in Steam's main page.
+    st.why = "local SteamClient.Apps missing";
+    job = api("cdp_apply", { appid: appid, kind: kind, url: it.url }).then(function () {
+      Framey.toast(S.doneLive, 4000);
+    }).catch(function (e) {
+      st.why += " / cdp: " + String((e && e.message) || e);
+      return viaFile();
+    });
   }
   job.then(function () {
     st.has[kind] = true;
@@ -375,7 +407,7 @@ function resetItem(appid, kind) {
   const apps = steamApps();
   const live = apps && typeof apps.ClearCustomArtworkForApp === "function"
     ? attempt(function () { return apps.ClearCustomArtworkForApp(Number(appid), STEAM_TYPE[kind]); }, 10000).catch(function () {})
-    : Promise.resolve();
+    : api("cdp_reset", { appid: appid, kind: kind }).catch(function () {});
   return live.then(function () { return api("reset", { appid: appid, kind: kind }); });
 }
 

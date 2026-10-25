@@ -6,9 +6,13 @@ with timeouts and size caps.
 """
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
+import socket
+import struct
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -290,6 +294,228 @@ def _fetch(url):
     return {"data": base64.b64encode(data).decode("ascii"), "ext": ext}
 
 
+# ---- instant refresh through Steam's own page ------------------------------
+# The Framey panel lives in SteamVR's page, which has no SteamClient.Apps. Steam's main page
+# ("SharedJSContext") does, and it is reachable on the local debug port. We talk to it with a
+# minimal WebSocket client (standard library only) and call the same function Decky uses.
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+CDP_PORTS = range(8080, 8091)
+CHUNK = 3 * 131072          # raw bytes per message (524288 base64 characters)
+STEAM_TYPE = {"grid_p": 0, "hero": 1, "logo": 2, "grid_w": 3, "icon": 4}
+EXPR_SET = ('(async()=>{try{const a=window.SteamClient&&window.SteamClient.Apps;'
+            'if(!a||typeof a.SetCustomArtworkForApp!=="function")return "missing";'
+            'await a.SetCustomArtworkForApp(%d,window.__fyArt,"%s",%d);return "ok"}'
+            'catch(e){return "error:"+String(e&&e.message||e)}})()')
+EXPR_CLEAR = ('(async()=>{try{const a=window.SteamClient&&window.SteamClient.Apps;'
+              'if(!a||typeof a.ClearCustomArtworkForApp!=="function")return "missing";'
+              'await a.ClearCustomArtworkForApp(%d,%d);return "ok"}'
+              'catch(e){return "error:"+String(e&&e.message||e)}})()')
+EXPR_PROBE = ('JSON.stringify((function(){var a=window.SteamClient&&window.SteamClient.Apps;'
+              'return {apps:typeof a,set:typeof (a&&a.SetCustomArtworkForApp),'
+              'clear:typeof (a&&a.ClearCustomArtworkForApp),href:String(location.href).slice(0,100)}})())')
+
+
+def _cdp_target():
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for port in CDP_PORTS:
+        try:
+            with op.open("http://127.0.0.1:%d/json/list" % port, timeout=1) as r:
+                data = json.loads(r.read(300000).decode("utf-8", "replace"))
+        except Exception:
+            continue
+        for t in data if isinstance(data, list) else []:
+            if isinstance(t, dict) and "sharedjscontext" in str(t.get("title", "")).lower():
+                ws = t.get("webSocketDebuggerUrl")
+                if isinstance(ws, str):
+                    path = urllib.parse.urlparse(ws).path
+                    if path.startswith("/devtools/"):
+                        return port, path
+    raise _Err("no_target")
+
+
+class _WS:
+    def __init__(self, port, path):
+        s = socket.create_connection(("127.0.0.1", port), timeout=10)
+        s.settimeout(10)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        s.sendall(("GET %s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                   "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (path, port, key)).encode("ascii"))
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            c = s.recv(4096)
+            if not c or len(buf) > 16384:
+                s.close()
+                raise _Err("cdp_failed")
+            buf += c
+        head, _, rest = buf.partition(b"\r\n\r\n")
+        want = base64.b64encode(hashlib.sha1((key + WS_GUID).encode("ascii")).digest())
+        if not head.startswith(b"HTTP/1.1 101") or want not in head:
+            s.close()
+            raise _Err("cdp_failed")
+        self.s, self.buf = s, rest
+
+    def _send_frame(self, op, payload):
+        n = len(payload)
+        if n < 126:
+            head = bytes([0x80 | op, 0x80 | n])
+        elif n < 65536:
+            head = bytes([0x80 | op, 0xFE]) + struct.pack(">H", n)
+        else:
+            head = bytes([0x80 | op, 0xFF]) + struct.pack(">Q", n)
+        mask = os.urandom(4)
+        body = b""
+        if n:
+            m = (mask * (n // 4 + 1))[:n]
+            body = (int.from_bytes(payload, "big") ^ int.from_bytes(m, "big")).to_bytes(n, "big")
+        self.s.sendall(head + mask + body)
+
+    def send(self, text):
+        self._send_frame(1, text.encode("utf-8"))
+
+    def _need(self, n):
+        while len(self.buf) < n:
+            c = self.s.recv(65536)
+            if not c:
+                raise _Err("cdp_closed")
+            self.buf += c
+
+    def recv(self, limit=1 << 20):
+        data = b""
+        while True:
+            self._need(2)
+            b0, b1 = self.buf[0], self.buf[1]
+            op, ln, pos = b0 & 0x0F, b1 & 0x7F, 2
+            if ln == 126:
+                self._need(4)
+                ln, pos = struct.unpack(">H", self.buf[2:4])[0], 4
+            elif ln == 127:
+                self._need(10)
+                ln, pos = struct.unpack(">Q", self.buf[2:10])[0], 10
+            if ln > limit:
+                raise _Err("cdp_big")
+            mask = b""
+            if b1 & 0x80:
+                self._need(pos + 4)
+                mask, pos = self.buf[pos:pos + 4], pos + 4
+            self._need(pos + ln)
+            payload = self.buf[pos:pos + ln]
+            self.buf = self.buf[pos + ln:]
+            if mask and ln:
+                m = (mask * (ln // 4 + 1))[:ln]
+                payload = (int.from_bytes(payload, "big") ^ int.from_bytes(m, "big")).to_bytes(ln, "big")
+            if op == 8:
+                raise _Err("cdp_closed")
+            if op == 9:
+                self._send_frame(0xA, payload)
+                continue
+            if op == 0xA:
+                continue
+            data += payload
+            if len(data) > limit:
+                raise _Err("cdp_big")
+            if b0 & 0x80:
+                return data
+
+    def close(self):
+        try:
+            self._send_frame(8, b"")
+        except OSError:
+            pass
+        try:
+            self.s.close()
+        except OSError:
+            pass
+
+
+def _eval(ws, n, expr):
+    ws.send(json.dumps({"id": n, "method": "Runtime.evaluate",
+                        "params": {"expression": expr, "awaitPromise": True, "returnByValue": True}}))
+    end = time.time() + 25
+    while time.time() < end:
+        msg = json.loads(ws.recv().decode("utf-8", "replace"))
+        if msg.get("id") == n:
+            res = msg.get("result") or {}
+            if msg.get("error") or res.get("exceptionDetails"):
+                raise _Err("cdp_exception")
+            return (res.get("result") or {}).get("value")
+    raise _Err("timeout")
+
+
+def _verdict(res):
+    if res == "ok":
+        return
+    if res == "missing":
+        raise _Err("api_missing")
+    raise _Err("cdp:" + str(res)[:80])
+
+
+def _cdp_apply(appid, kind, url):
+    data = _get(url, {"User-Agent": UA}, MAX_IMG)
+    ext = _sniff(data)
+    if ext not in ("png", "jpg"):
+        raise _Err("bad_image")
+    port, path = _cdp_target()
+    ws = _WS(port, path)
+    n = 1
+    try:
+        _eval(ws, n, 'window.__fyArt=""')
+        for i in range(0, len(data), CHUNK):
+            n += 1
+            b64 = base64.b64encode(data[i:i + CHUNK]).decode("ascii")
+            _eval(ws, n, '(window.__fyArt+="%s"),0' % b64)
+        n += 1
+        res = _eval(ws, n, EXPR_SET % (int(appid), ext, STEAM_TYPE[kind]))
+    finally:
+        try:
+            _eval(ws, n + 1, "delete window.__fyArt,0")
+        except Exception:
+            pass
+        ws.close()
+    _verdict(res)
+    return {"ok": True}
+
+
+def _cdp_reset(appid, kind):
+    port, path = _cdp_target()
+    ws = _WS(port, path)
+    try:
+        res = _eval(ws, 1, EXPR_CLEAR % (int(appid), STEAM_TYPE[kind]))
+    finally:
+        ws.close()
+    _verdict(res)
+    return {"ok": True}
+
+
+def _cdp_probe():
+    port, path = _cdp_target()
+    ws = _WS(port, path)
+    try:
+        res = _eval(ws, 1, EXPR_PROBE)
+    finally:
+        ws.close()
+    out = json.loads(res)
+    out["port"] = port
+    return out
+
+
+def _targets():
+    """Pages Steam offers on local debug ports (diagnostics only)."""
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    ports, out = [], []
+    for port in range(8080, 8091):
+        try:
+            with op.open("http://127.0.0.1:%d/json/list" % port, timeout=1) as r:
+                data = json.loads(r.read(300000).decode("utf-8", "replace"))
+        except Exception:
+            continue
+        ports.append(port)
+        for t in data if isinstance(data, list) else []:
+            if isinstance(t, dict):
+                out.append({"port": port, "title": str(t.get("title", ""))[:60],
+                            "url": str(t.get("url", ""))[:100], "ws": bool(t.get("webSocketDebuggerUrl"))})
+    return {"ports": ports, "targets": out[:40]}
+
+
 def _thumb(url):
     data = _get(url, {"User-Agent": UA}, MAX_THUMB)
     ext = _sniff(data)
@@ -338,6 +564,19 @@ async def call(method, arg):
             if not (isinstance(url, str) and _host_ok(url)):
                 raise _Err("bad_url")
             return await _run(_apply, appid, kind, url)
+        if method == "cdp_apply":
+            appid, kind = _target(arg)
+            url = arg.get("url")
+            if not (isinstance(url, str) and _host_ok(url)):
+                raise _Err("bad_url")
+            return await _run(_cdp_apply, appid, kind, url)
+        if method == "cdp_reset":
+            appid, kind = _target(arg)
+            return await _run(_cdp_reset, appid, kind)
+        if method == "cdp_probe":
+            return await _run(_cdp_probe)
+        if method == "targets":
+            return await _run(_targets)
         if method == "fetch":
             url = arg.get("url") if isinstance(arg, dict) else None
             if not (isinstance(url, str) and _host_ok(url)):

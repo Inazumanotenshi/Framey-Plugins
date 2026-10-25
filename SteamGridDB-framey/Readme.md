@@ -41,7 +41,7 @@ To use the plugin, you need a personal API key from SteamGridDB:
 3. Select **SteamGridDB Framey** and scroll down to the game you want to change.
 4. Choose a category (Capsule, Header, Hero, Logo) and browse for your desired image.
 5. Confirm your selection—the artwork will download and apply automatically.
-6. Restart SteamVR.
+6. The new artwork is applied instantly. If it doesn't show up right away, restart SteamVR.
 
 ## 🤝 Credits & Acknowledgments
 
