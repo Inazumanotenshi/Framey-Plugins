@@ -144,7 +144,9 @@ let root = null;
 
 function errText(e) {
   const m = String((e && e.message) || e);
-  return S.err[m] || (m.indexOf("http_") === 0 ? "HTTP " + m.slice(5) : S.err.generic);
+  if (S.err[m]) return S.err[m];
+  if (m.indexOf("bad_data") === 0) return S.err.bad_data + " (" + m.slice(9) + ")";
+  return m.indexOf("http_") === 0 ? "HTTP " + m.slice(5) : S.err.generic;
 }
 
 function setLang(code, save) {

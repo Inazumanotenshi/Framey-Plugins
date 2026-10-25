@@ -232,9 +232,14 @@ def _list(appid, kind, page):
     q["page"] = str(page)
     url = "%s/%s/steam/%s?%s" % (API, endpoint, appid, urllib.parse.urlencode(q))
     raw = _get(url, {"Authorization": "Bearer " + key, "User-Agent": UA}, MAX_JSON)
-    data = json.loads(raw.decode("utf-8", "replace")).get("data")
+    snippet = raw[:100].decode("utf-8", "replace").replace("\n", " ")
+    try:
+        parsed = json.loads(raw.decode("utf-8", "replace"))
+    except ValueError:
+        raise _Err("bad_data:not JSON:" + snippet)
+    data = parsed.get("data") if isinstance(parsed, dict) else None
     if not isinstance(data, list):
-        raise _Err("bad_data")
+        raise _Err("bad_data:no list:" + snippet)
     items = []
     for i in data:
         if not isinstance(i, dict):
@@ -605,5 +610,5 @@ async def call(method, arg):
         return {"error": "network"}
     except OSError:
         return {"error": "io"}
-    except ValueError:
-        return {"error": "bad_data"}
+    except ValueError as e:
+        return {"error": "bad_data:%s:%s" % (method, str(e)[:60])}
