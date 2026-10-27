@@ -12,7 +12,9 @@ import os
 import re
 import socket
 import struct
+import threading
 import time
+import zlib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -37,7 +39,7 @@ KINDS = {
     "grid_w": ("grids", {"dimensions": "460x215,920x430", "mimes": RASTER}, "{}"),
     "hero": ("heroes", {"mimes": RASTER}, "{}_hero"),
     "logo": ("logos", {"mimes": "image/png"}, "{}_logo"),
-    "icon": ("icons", {"mimes": RASTER}, "{}_icon"),
+    "icon": ("icons", {"mimes": "image/png,image/vnd.microsoft.icon"}, "{}_icon"),
 }
 SKIP = re.compile(r"^(Proton|Steam Linux Runtime|Steamworks Common)", re.I)
 
@@ -89,6 +91,89 @@ def _sniff(b):
     return None
 
 
+def _png(w, h, rgba):
+    raw = b"".join(b"\0" + rgba[y * w * 4:(y + 1) * w * 4] for y in range(h))
+
+    def chunk(tag, body):
+        c = tag + body
+        return struct.pack(">I", len(body)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def _ico_to_png(data):
+    """Largest image of an .ico file as PNG (stdlib only). Raises _Err('bad_image') if unsupported."""
+    try:
+        reserved, kind, count = struct.unpack_from("<HHH", data, 0)
+        if reserved != 0 or kind != 1 or not 0 < count <= 64:
+            raise _Err("bad_image")
+        best = None
+        for i in range(count):
+            w, h, _c, _r, _p, bpp, size, off = struct.unpack_from("<BBBBHHII", data, 6 + 16 * i)
+            score = (w or 256) * (h or 256) * 1000 + bpp
+            if off + size <= len(data) and size > 0 and (best is None or score > best[0]):
+                best = (score, off, size)
+        if best is None:
+            raise _Err("bad_image")
+        img = data[best[1]:best[1] + best[2]]
+        if img[:8] == b"\x89PNG\r\n\x1a\n":
+            return img
+        hdr, w, h2, _pl, bpp, comp = struct.unpack_from("<IiiHHI", img, 0)
+        h = h2 // 2
+        if comp != 0 or hdr < 40 or not (0 < w <= 512 and 0 < h <= 512) or bpp not in (1, 4, 8, 24, 32):
+            raise _Err("bad_image")
+        ncol = struct.unpack_from("<I", img, 32)[0] or (1 << bpp if bpp <= 8 else 0)
+        pal = []
+        if bpp <= 8:
+            for k in range(ncol):
+                b_, g_, r_, _a = struct.unpack_from("<BBBB", img, hdr + 4 * k)
+                pal.append((r_, g_, b_))
+        px0 = hdr + 4 * (ncol if bpp <= 8 else 0)
+        stride = ((w * bpp + 31) // 32) * 4
+        mstride = ((w + 31) // 32) * 4
+        mask0 = px0 + stride * h
+        out = bytearray(w * h * 4)
+        has_alpha = False
+        for y in range(h):
+            row = img[px0 + stride * (h - 1 - y):px0 + stride * (h - y)]
+            mrow = img[mask0 + mstride * (h - 1 - y):mask0 + mstride * (h - y)]
+            for x in range(w):
+                if bpp == 32:
+                    b_, g_, r_, a_ = row[4 * x:4 * x + 4]
+                    has_alpha = has_alpha or a_ > 0
+                elif bpp == 24:
+                    b_, g_, r_ = row[3 * x:3 * x + 3]
+                    a_ = 255
+                else:
+                    if bpp == 8:
+                        idx = row[x]
+                    elif bpp == 4:
+                        idx = (row[x // 2] >> (4 if x % 2 == 0 else 0)) & 15
+                    else:
+                        idx = (row[x // 8] >> (7 - x % 8)) & 1
+                    r_, g_, b_ = pal[idx] if idx < len(pal) else (0, 0, 0)
+                    a_ = 255
+                if bpp != 32 or not has_alpha:
+                    if mrow and len(mrow) > x // 8 and (mrow[x // 8] >> (7 - x % 8)) & 1:
+                        a_ = 0
+                    elif bpp == 32:
+                        a_ = 255
+                o = (y * w + x) * 4
+                out[o:o + 4] = bytes((r_, g_, b_, a_))
+        if bpp == 32 and has_alpha:                  # real alpha channel: ignore the AND mask
+            pass
+        return _png(w, h, bytes(out))
+    except (struct.error, IndexError, ValueError):
+        raise _Err("bad_image")
+
+
+def _image(data):
+    """(extension, bytes) for PNG/JPEG/WebP; .ico files are converted to PNG."""
+    if data[:4] == b"\0\0\1\0":
+        data = _ico_to_png(data)
+    return _sniff(data), data
+
+
 async def _run(fn, *args):
     loop = asyncio.get_running_loop()
     return await asyncio.wait_for(loop.run_in_executor(None, fn, *args), TOTAL)
@@ -113,27 +198,73 @@ def _write(d):
     os.replace(str(tmp), str(CONF))
 
 
+_CFG_LOCK = threading.Lock()
+
+
+def _update(mutator):
+    with _CFG_LOCK:
+        d = _load()
+        mutator(d)
+        _write(d)
+        return d
+
+
+def _clean_map(d):
+    """appid -> {gid, name}: apps matched by hand to a SteamGridDB game."""
+    out = {}
+    mp = d.get("map")
+    if isinstance(mp, dict):
+        for k, v in mp.items():
+            if (re.fullmatch(r"[0-9]{1,10}", str(k)) and isinstance(v, dict)
+                    and isinstance(v.get("gid"), int) and not isinstance(v.get("gid"), bool)):
+                out[str(k)] = {"gid": v["gid"], "name": str(v.get("name", ""))[:80]}
+    return out
+
+
+def _clean_unknown(d):
+    """appid -> local name ('' if none): apps SteamGridDB did not recognise."""
+    out = {}
+    u = d.get("unknown")
+    if isinstance(u, dict):
+        for k, v in u.items():
+            if re.fullmatch(r"[0-9]{1,10}", str(k)):
+                out[str(k)] = str(v or "")[:80]
+    return out
+
+
+KEY_FILE = "steamgriddb-key.txt"      # optional: put the API key in this file in the home folder
+
+
 def _key():
     k = _load().get("api_key")
-    return k if isinstance(k, str) else ""
+    if isinstance(k, str) and k:
+        return k
+    try:                                  # no key saved yet: import it from the key file, if there is one
+        with open(Path.home() / KEY_FILE, "r", errors="replace") as f:
+            k = f.read(4096).strip()
+    except OSError:
+        return ""
+    if not re.fullmatch(r"[0-9A-Za-z]{16,64}", k):
+        return ""
+    try:
+        _update(lambda d: d.__setitem__("api_key", k))
+    except OSError:
+        pass
+    return k
 
 
 def _save_key(k):
     k = k.strip() if isinstance(k, str) else ""
     if not re.fullmatch(r"[0-9A-Za-z]{16,64}", k):
         raise _Err("bad_key_format")
-    d = _load()
-    d["api_key"] = k
-    _write(d)
+    _update(lambda d: d.__setitem__("api_key", k))
     return {"ok": True}
 
 
 def _set_lang(code):
     if code not in LANGS:
         raise _Err("bad_arg")
-    d = _load()
-    d["lang"] = code
-    _write(d)
+    _update(lambda d: d.__setitem__("lang", code))
     return {"ok": True}
 
 
@@ -170,7 +301,85 @@ def _grid_dir(create=True):
     return g
 
 
-def _games():
+def _parse_shortcuts(data):
+    """Minimal reader for Steam's binary shortcuts.vdf -> list of (unsigned appid, name)."""
+    out, pos, n = [], 0, len(data)
+
+    def cstr():
+        nonlocal pos
+        e = data.find(b"\0", pos)
+        if e < 0:
+            raise ValueError("bad vdf")
+        s = data[pos:e].decode("utf-8", "replace")
+        pos = e + 1
+        return s
+
+    def node(depth):
+        nonlocal pos
+        res = {}
+        while pos < n:
+            t = data[pos]
+            pos += 1
+            if t == 8:
+                return res
+            k = cstr().lower()
+            if t == 0:
+                if depth > 6:
+                    raise ValueError("too deep")
+                res[k] = node(depth + 1)
+            elif t == 1:
+                res[k] = cstr()
+            elif t == 2:
+                if pos + 4 > n:
+                    raise ValueError("short")
+                res[k] = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+            else:
+                raise ValueError("type")
+        return res
+    try:
+        root = node(0)
+    except (ValueError, struct.error):
+        return out
+    top = root.get("shortcuts", root)
+    if isinstance(top, dict):
+        for v in top.values():
+            if not isinstance(v, dict):
+                continue
+            name = v.get("appname") if isinstance(v.get("appname"), str) else ""
+            aid = v.get("appid")
+            if not isinstance(aid, int):          # older entries: Steam derives the id from exe + name
+                exe = v.get("exe") if isinstance(v.get("exe"), str) else ""
+                aid = (zlib.crc32((exe + name).encode("utf-8")) & 0xFFFFFFFF) | 0x80000000
+            if name:
+                out.append((str(aid & 0xFFFFFFFF), name))
+    return out
+
+
+def _shortcuts():
+    """Non-Steam shortcuts of every Steam user: appid -> name."""
+    out = {}
+    root = _steam_root()
+    if root is None:
+        return out
+    try:
+        users = sorted((root / "userdata").iterdir())
+    except OSError:
+        return out
+    for u in users:
+        if not (u.name.isdigit() and u.name != "0"):
+            continue
+        try:
+            raw = (u / "config" / "shortcuts.vdf").read_bytes()
+        except OSError:
+            continue
+        for aid, name in _parse_shortcuts(raw[:2000000]):
+            out.setdefault(aid, name)
+    return out
+
+
+def _manifests():
+    """appid -> name of every installed Steam app (from the appmanifest files)."""
     root = _steam_root()
     if root is None:
         raise _Err("no_steam")
@@ -184,7 +393,7 @@ def _games():
                 libs.append(p)
     except OSError:
         pass
-    out, ids = [], set()
+    out = {}
     for lib in libs:
         try:
             files = sorted((lib / "steamapps").glob("appmanifest_*.acf"))
@@ -197,11 +406,28 @@ def _games():
                 continue
             a = re.search(r'"appid"\s+"([0-9]+)"', t)
             n = re.search(r'"name"\s+"([^"]*)"', t)
-            if not a or not n or a.group(1) in ids or SKIP.match(n.group(1)):
+            if not a or not n or a.group(1) in out or SKIP.match(n.group(1)):
                 continue
-            ids.add(a.group(1))
-            out.append({"appid": a.group(1), "name": n.group(1)})
-    out.sort(key=lambda g: g["name"].lower())
+            out[a.group(1)] = n.group(1)
+    for aid, name in _shortcuts().items():
+        out.setdefault(aid, name)
+    return out
+
+
+def _games():
+    names = _manifests()
+    d = _load()
+    mp, unk = _clean_map(d), _clean_unknown(d)
+    ids = list(names) + [k for k in list(mp) + list(unk) if k not in names]
+    out, seen = [], set()
+    for appid in ids:
+        if appid in seen:
+            continue
+        seen.add(appid)
+        m = mp.get(appid)
+        name = names.get(appid) or (m["name"] if m else "") or unk.get(appid, "")
+        out.append({"appid": appid, "name": name, "unknown": appid in unk and not m, "mapped": bool(m)})
+    out.sort(key=lambda g: (g["name"] == "", g["name"].lower(), int(g["appid"])))
     return {"games": out}
 
 
@@ -222,16 +448,7 @@ def _has(appid):
 
 # ---- SteamGridDB ----------------------------------------------------------
 
-def _list(appid, kind, page):
-    key = _key()
-    if not key:
-        raise _Err("no_key")
-    endpoint, extra, _ = KINDS[kind]
-    q = dict(extra)
-    q["types"] = "static"
-    q["page"] = str(page)
-    url = "%s/%s/steam/%s?%s" % (API, endpoint, appid, urllib.parse.urlencode(q))
-    raw = _get(url, {"Authorization": "Bearer " + key, "User-Agent": UA}, MAX_JSON)
+def _data_list(raw):
     snippet = raw[:100].decode("utf-8", "replace").replace("\n", " ")
     try:
         parsed = json.loads(raw.decode("utf-8", "replace"))
@@ -240,6 +457,43 @@ def _list(appid, kind, page):
     data = parsed.get("data") if isinstance(parsed, dict) else None
     if not isinstance(data, list):
         raise _Err("bad_data:no list:" + snippet)
+    return data
+
+
+def _mark_unknown(appid):
+    try:
+        name = _manifests().get(appid, "")
+    except _Err:
+        name = ""
+
+    def mut(d):
+        unk = _clean_unknown(d)
+        if appid not in unk and len(unk) < 200:
+            unk[appid] = name
+        d["unknown"] = unk
+    _update(mut)
+
+
+def _list(appid, kind, page):
+    key = _key()
+    if not key:
+        raise _Err("no_key")
+    endpoint, extra, _ = KINDS[kind]
+    q = dict(extra)
+    q["types"] = "static"
+    q["page"] = str(page)
+    mapped = _clean_map(_load()).get(appid)
+    if mapped:
+        url = "%s/%s/game/%d?%s" % (API, endpoint, mapped["gid"], urllib.parse.urlencode(q))
+    else:
+        url = "%s/%s/steam/%s?%s" % (API, endpoint, appid, urllib.parse.urlencode(q))
+    try:
+        raw = _get(url, {"Authorization": "Bearer " + key, "User-Agent": UA}, MAX_JSON)
+    except urllib.error.HTTPError as e:
+        if e.code == 404 and not mapped:
+            _mark_unknown(appid)        # SteamGridDB does not know this app: list it under "Unknown"
+        raise
+    data = _data_list(raw)
     items = []
     for i in data:
         if not isinstance(i, dict):
@@ -257,13 +511,69 @@ def _list(appid, kind, page):
             "h": i.get("height"),
             "author": author.get("name") if isinstance(author, dict) else None,
         })
-    return {"items": items, "more": len(data) >= 50}
+    return {"items": items, "more": len(data) >= 50, "mapped": mapped}
+
+
+def _search(term):
+    """Search SteamGridDB games by name. Falls back to simpler spellings when nothing is found."""
+    key = _key()
+    if not key:
+        raise _Err("no_key")
+    t = " ".join(str(term).split())[:80]
+    if len(t) < 2:
+        raise _Err("bad_arg")
+    tries = [t]
+    t2 = re.sub(r"[\(\[][^\)\]]*[\)\]]", " ", t)          # drop "(VR)" and "[Demo]"
+    t2 = " ".join(re.sub(r"[^\w\s]", " ", t2).split())     # drop punctuation
+    if len(t2) >= 2 and t2.lower() != t.lower():
+        tries.append(t2)
+    words = t2.split()
+    if len(words) >= 3 and len(" ".join(words[:2])) >= 2:
+        tries.append(" ".join(words[:2]))
+    for tr in tries:
+        url = "%s/search/autocomplete/%s" % (API, urllib.parse.quote(tr, safe=""))
+        try:
+            raw = _get(url, {"Authorization": "Bearer " + key, "User-Agent": UA}, MAX_JSON)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue
+            raise
+        res = []
+        for g in _data_list(raw)[:15]:
+            if isinstance(g, dict) and isinstance(g.get("id"), int) and isinstance(g.get("name"), str):
+                res.append({"id": g["id"], "name": g["name"][:80], "verified": g.get("verified") is True})
+        if res:
+            res.sort(key=lambda x: x["name"].lower() != tr.lower())   # exact match first
+            return {"results": res, "term": tr}
+    return {"results": [], "term": tries[-1]}
+
+
+def _assign(appid, gid, name):
+    def mut(d):
+        mp = _clean_map(d)
+        if appid in mp or len(mp) < 500:
+            mp[appid] = {"gid": gid, "name": name}
+        d["map"] = mp
+        unk = _clean_unknown(d)
+        unk.pop(appid, None)
+        d["unknown"] = unk
+    _update(mut)
+    return {"ok": True}
+
+
+def _forget(appid):
+    def mut(d):
+        mp, unk = _clean_map(d), _clean_unknown(d)
+        mp.pop(appid, None)
+        unk.pop(appid, None)
+        d["map"], d["unknown"] = mp, unk
+    _update(mut)
+    return {"ok": True}
 
 
 def _apply(appid, kind, url):
     grid = _grid_dir()
-    data = _get(url, {"User-Agent": UA}, MAX_IMG)
-    ext = _sniff(data)
+    ext, data = _image(_get(url, {"User-Agent": UA}, MAX_IMG))
     if ext not in ("png", "jpg"):
         raise _Err("bad_image")
     base = KINDS[kind][2].format(appid)
@@ -292,8 +602,7 @@ def _reset(appid, kind):
 
 def _fetch(url):
     """Image as base64 for Steam's own set-artwork call (instant refresh, no file written here)."""
-    data = _get(url, {"User-Agent": UA}, MAX_LIVE)
-    ext = _sniff(data)
+    ext, data = _image(_get(url, {"User-Agent": UA}, MAX_LIVE))
     if ext not in ("png", "jpg"):
         raise _Err("bad_image")
     return {"data": base64.b64encode(data).decode("ascii"), "ext": ext}
@@ -309,6 +618,7 @@ CHUNK = 3 * 131072          # raw bytes per message (524288 base64 characters)
 STEAM_TYPE = {"grid_p": 0, "hero": 1, "logo": 2, "grid_w": 3, "icon": 4}
 EXPR_SET = ('(async()=>{try{const a=window.SteamClient&&window.SteamClient.Apps;'
             'if(!a||typeof a.SetCustomArtworkForApp!=="function")return "missing";'
+            'try{if(typeof a.ClearCustomArtworkForApp==="function")await a.ClearCustomArtworkForApp(%d,%d)}catch(e){}'
             'await a.SetCustomArtworkForApp(%d,window.__fyArt,"%s",%d);return "ok"}'
             'catch(e){return "error:"+String(e&&e.message||e)}})()')
 EXPR_CLEAR = ('(async()=>{try{const a=window.SteamClient&&window.SteamClient.Apps;'
@@ -455,8 +765,7 @@ def _verdict(res):
 
 
 def _cdp_apply(appid, kind, url):
-    data = _get(url, {"User-Agent": UA}, MAX_IMG)
-    ext = _sniff(data)
+    ext, data = _image(_get(url, {"User-Agent": UA}, MAX_IMG))
     if ext not in ("png", "jpg"):
         raise _Err("bad_image")
     port, path = _cdp_target()
@@ -469,7 +778,7 @@ def _cdp_apply(appid, kind, url):
             b64 = base64.b64encode(data[i:i + CHUNK]).decode("ascii")
             _eval(ws, n, '(window.__fyArt+="%s"),0' % b64)
         n += 1
-        res = _eval(ws, n, EXPR_SET % (int(appid), ext, STEAM_TYPE[kind]))
+        res = _eval(ws, n, EXPR_SET % (int(appid), STEAM_TYPE[kind], int(appid), ext, STEAM_TYPE[kind]))
     finally:
         try:
             _eval(ws, n + 1, "delete window.__fyArt,0")
@@ -522,8 +831,7 @@ def _targets():
 
 
 def _thumb(url):
-    data = _get(url, {"User-Agent": UA}, MAX_THUMB)
-    ext = _sniff(data)
+    ext, data = _image(_get(url, {"User-Agent": UA}, MAX_THUMB))
     if ext is None:
         raise _Err("bad_image")
     mime = "jpeg" if ext == "jpg" else ext
@@ -563,6 +871,21 @@ async def call(method, arg):
             page = arg.get("page", 0)
             page = page if isinstance(page, int) and 0 <= page < 100 else 0
             return await _run(_list, appid, kind, page)
+        if method == "search":
+            term = arg.get("term") if isinstance(arg, dict) else None
+            if not isinstance(term, str):
+                raise _Err("bad_arg")
+            return await _run(_search, term)
+        if method in ("assign", "forget"):
+            if not isinstance(arg, dict) or not re.fullmatch(r"[0-9]{1,10}", str(arg.get("appid", ""))):
+                raise _Err("bad_appid")
+            appid = str(arg["appid"])
+            if method == "forget":
+                return await _run(_forget, appid)
+            gid, name = arg.get("gid"), arg.get("name")
+            if not (isinstance(gid, int) and not isinstance(gid, bool) and 0 < gid < 10 ** 9 and isinstance(name, str)):
+                raise _Err("bad_arg")
+            return await _run(_assign, appid, gid, name[:80])
         if method == "apply":
             appid, kind = _target(arg)
             url = arg.get("url")

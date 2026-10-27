@@ -116,6 +116,130 @@ const LANGS = {
   },
 };
 
+// Texts for the search-by-name feature (merged into S by build(); English is the fallback).
+const MORE = {
+  "en": {
+    "unknownTitle": "Unknown apps",
+    "unknownName": "Unknown",
+    "unknownHint": "SteamGridDB doesn't know these apps. Tap one and search by name.",
+    "searchTitle": "Find the game on SteamGridDB",
+    "searchHint": "Enter the game's name. Your choice is remembered for this app.",
+    "searchPh": "Game name",
+    "searchBtn": "Search",
+    "searchOther": "Search by name",
+    "suggestions": "Suggestions",
+    "searchedFor": "Searched for",
+    "noMatches": "Nothing found for this name.",
+    "searching": "Searching …",
+    "hide": "Hide",
+    "mappedTo": "Matched to",
+    "forget": "Remove match",
+    "forgotDone": "Match removed.",
+    "removeUnknown": "Remove from list",
+    "assigned": "Matched."
+  },
+  "de": {
+    "unknownTitle": "Unbekannte Apps",
+    "unknownName": "Unbekannt",
+    "unknownHint": "SteamGridDB kennt diese Apps nicht. Antippen und per Namen suchen.",
+    "searchTitle": "Spiel bei SteamGridDB suchen",
+    "searchHint": "Gib den Namen des Spiels ein. Deine Auswahl wird für diese App gespeichert.",
+    "searchPh": "Spielname",
+    "searchBtn": "Suchen",
+    "searchOther": "Nach Namen suchen",
+    "suggestions": "Vorschläge",
+    "searchedFor": "Gesucht nach",
+    "noMatches": "Zu diesem Namen wurde nichts gefunden.",
+    "searching": "Suche …",
+    "hide": "Ausblenden",
+    "mappedTo": "Zugeordnet zu",
+    "forget": "Zuordnung entfernen",
+    "forgotDone": "Zuordnung entfernt.",
+    "removeUnknown": "Aus Liste entfernen",
+    "assigned": "Zugeordnet."
+  },
+  "fr": {
+    "unknownTitle": "Applications inconnues",
+    "unknownName": "Inconnue",
+    "unknownHint": "SteamGridDB ne connaît pas ces applications. Touchez-en une et cherchez par nom.",
+    "searchTitle": "Trouver le jeu sur SteamGridDB",
+    "searchHint": "Saisissez le nom du jeu. Votre choix est mémorisé pour cette application.",
+    "searchPh": "Nom du jeu",
+    "searchBtn": "Rechercher",
+    "searchOther": "Rechercher par nom",
+    "suggestions": "Suggestions",
+    "searchedFor": "Recherché",
+    "noMatches": "Rien trouvé pour ce nom.",
+    "searching": "Recherche …",
+    "hide": "Masquer",
+    "mappedTo": "Associé à",
+    "forget": "Supprimer l'association",
+    "forgotDone": "Association supprimée.",
+    "removeUnknown": "Retirer de la liste",
+    "assigned": "Associé."
+  },
+  "es": {
+    "unknownTitle": "Aplicaciones desconocidas",
+    "unknownName": "Desconocida",
+    "unknownHint": "SteamGridDB no conoce estas apps. Toca una y busca por nombre.",
+    "searchTitle": "Buscar el juego en SteamGridDB",
+    "searchHint": "Escribe el nombre del juego. Tu elección se guarda para esta app.",
+    "searchPh": "Nombre del juego",
+    "searchBtn": "Buscar",
+    "searchOther": "Buscar por nombre",
+    "suggestions": "Sugerencias",
+    "searchedFor": "Buscado",
+    "noMatches": "No se encontró nada con ese nombre.",
+    "searching": "Buscando …",
+    "hide": "Ocultar",
+    "mappedTo": "Asignado a",
+    "forget": "Quitar asignación",
+    "forgotDone": "Asignación quitada.",
+    "removeUnknown": "Quitar de la lista",
+    "assigned": "Asignado."
+  },
+  "it": {
+    "unknownTitle": "App sconosciute",
+    "unknownName": "Sconosciuta",
+    "unknownHint": "SteamGridDB non conosce queste app. Toccane una e cerca per nome.",
+    "searchTitle": "Cerca il gioco su SteamGridDB",
+    "searchHint": "Inserisci il nome del gioco. La tua scelta viene salvata per questa app.",
+    "searchPh": "Nome del gioco",
+    "searchBtn": "Cerca",
+    "searchOther": "Cerca per nome",
+    "suggestions": "Suggerimenti",
+    "searchedFor": "Cercato",
+    "noMatches": "Nessun risultato per questo nome.",
+    "searching": "Ricerca …",
+    "hide": "Nascondi",
+    "mappedTo": "Assegnato a",
+    "forget": "Rimuovi associazione",
+    "forgotDone": "Associazione rimossa.",
+    "removeUnknown": "Rimuovi dall'elenco",
+    "assigned": "Assegnato."
+  },
+  "pt": {
+    "unknownTitle": "Apps desconhecidos",
+    "unknownName": "Desconhecido",
+    "unknownHint": "O SteamGridDB não conhece estes apps. Toque em um e procure pelo nome.",
+    "searchTitle": "Procurar o jogo no SteamGridDB",
+    "searchHint": "Digite o nome do jogo. Sua escolha fica salva para este app.",
+    "searchPh": "Nome do jogo",
+    "searchBtn": "Procurar",
+    "searchOther": "Procurar por nome",
+    "suggestions": "Sugestões",
+    "searchedFor": "Procurado",
+    "noMatches": "Nada encontrado para esse nome.",
+    "searching": "Procurando …",
+    "hide": "Ocultar",
+    "mappedTo": "Associado a",
+    "forget": "Remover atribuição",
+    "forgotDone": "Atribuição removida.",
+    "removeUnknown": "Remover da lista",
+    "assigned": "Atribuído."
+  }
+};
+
 function pick(code) {
   const c = String(code || "").toLowerCase().slice(0, 2);
   return CODES.indexOf(c) >= 0 ? c : "en";
@@ -123,7 +247,7 @@ function pick(code) {
 
 function build(code) {
   const b = LANGS.en, l = LANGS[code] || {};
-  const o = Object.assign({}, b, l);
+  const o = Object.assign({}, b, MORE.en, l, MORE[code] || {});
   o.kinds = Object.assign({}, b.kinds, l.kinds);
   o.err = Object.assign({}, b.err, l.err);
   return o;
@@ -139,6 +263,8 @@ const st = {
   status: null, games: null, loading: false, homeErr: "", editKey: false,
   appid: null, name: "", kind: "grid_p", items: null, page: 0, more: false,
   has: {}, busy: false, req: 0, listErr: "", diag: null, why: null,
+  localName: "", unknown: false, mapped: null, srReq: 0, dirtyHome: false,
+  sr: { open: false, term: "", results: null, used: "", loading: false, err: "" },
 };
 let root = null;
 
@@ -237,17 +363,26 @@ function homeView() {
   w.appendChild(idInp);
   w.appendChild(Framey.button(S.open, BTN, function () {
     const v = idInp.value.trim();
-    if (/^[0-9]{1,10}$/.test(v)) select(v, "App " + v);
+    if (/^[0-9]{1,10}$/.test(v)) select(v, "", false);
   }));
 
-  w.appendChild(Framey.el("font-size:26px;font-weight:600;margin:18px 0 6px;", S.installed));
-  if (!st.games.length) w.appendChild(Framey.el("font-size:20px;color:#9aa5af;", S.noGames));
-  st.games.forEach(function (g) {
-    const row = Framey.el("padding:16px 20px;margin:8px 0;border-radius:14px;background:#2a3138;font-size:24px;cursor:pointer;", g.name);
+  const known = st.games.filter(function (g) { return !g.unknown; });
+  const unknown = st.games.filter(function (g) { return g.unknown; });
+  const addRow = function (g) {
+    const row = Framey.el("padding:16px 20px;margin:8px 0;border-radius:14px;background:" + (g.unknown ? "#2f2a38" : "#2a3138") +
+      ";font-size:24px;cursor:pointer;", g.name || S.unknownName);
     row.appendChild(Framey.el("font-size:16px;color:#7d8791;", String(g.appid)));
-    row.onclick = function () { select(g.appid, g.name); };
+    row.onclick = function () { select(g.appid, g.name, g.unknown); };
     w.appendChild(row);
-  });
+  };
+  w.appendChild(Framey.el("font-size:26px;font-weight:600;margin:18px 0 6px;", S.installed));
+  if (!known.length && !unknown.length) w.appendChild(Framey.el("font-size:20px;color:#9aa5af;", S.noGames));
+  known.forEach(addRow);
+  if (unknown.length) {
+    w.appendChild(Framey.el("font-size:26px;font-weight:600;margin:18px 0 6px;", S.unknownTitle));
+    w.appendChild(Framey.el("font-size:17px;color:#7d8791;", S.unknownHint));
+    unknown.forEach(addRow);
+  }
   w.appendChild(Framey.button(S.reload, BTN_DIM, function () { st.status = null; st.games = null; draw(); }));
 
   w.appendChild(Framey.el("font-size:26px;font-weight:600;margin:18px 0 6px;", S.language));
@@ -286,13 +421,19 @@ function homeView() {
 
 // ---- detail ---------------------------------------------------------------
 
-function select(appid, name) {
+function select(appid, name, unknown) {
   st.appid = appid;
-  st.name = name;
+  st.localName = name || "";
+  st.name = name || (S.unknownName + " · " + appid);
+  st.unknown = !!unknown;
+  st.mapped = null;
+  st.srReq++;
+  st.sr = { open: !!unknown, term: st.localName, results: null, used: "", loading: false, err: "" };
   st.kind = "grid_p";
   st.has = {};
   api("has", { appid: appid }).then(function (r) { st.has = r.has || {}; draw(); }).catch(function () {});
   switchKind("grid_p");
+  if (st.sr.open && st.sr.term.trim().length >= 2) runSearch();
 }
 
 function switchKind(kind) {
@@ -301,6 +442,7 @@ function switchKind(kind) {
   st.page = 0;
   st.more = false;
   st.listErr = "";
+  if (st.unknown) { st.items = []; draw(); return; }   // SteamGridDB doesn't know this app: search by name first
   loadItems();
   draw();
 }
@@ -314,10 +456,19 @@ function loadItems() {
     st.items = (st.items || []).concat(r.items || []);
     st.more = !!r.more;
     st.listErr = "";
+    st.mapped = r.mapped || null;
+    if (st.page === 0 && !st.items.length && kind === "grid_p" && !st.mapped) offerSearch();
   }).catch(function (e) {
     if (token !== st.req) return;
     st.items = st.items || [];
-    st.listErr = errText(e);
+    if (String((e && e.message) || e) === "not_found" && !st.mapped) {
+      st.unknown = true;      // the backend has listed it under "Unknown" now
+      st.dirtyHome = true;
+      st.listErr = "";
+      offerSearch();
+    } else {
+      st.listErr = errText(e);
+    }
   }).then(function () {
     if (token !== st.req) return;
     st.loading = false;
@@ -377,7 +528,11 @@ function applyItem(it) {
   if (apps && typeof apps.SetCustomArtworkForApp === "function") {
     job = api("fetch", { url: it.url }).then(function (r) {
       return attempt(function () {
-        return apps.SetCustomArtworkForApp(Number(appid), r.data, r.ext, STEAM_TYPE[kind]);
+        // Steam ignores a new image while a custom one exists: clear the old one first.
+        const pre = typeof apps.ClearCustomArtworkForApp === "function"
+          ? Promise.resolve().then(function () { return apps.ClearCustomArtworkForApp(Number(appid), STEAM_TYPE[kind]); }).catch(function () {})
+          : Promise.resolve();
+        return pre.then(function () { return apps.SetCustomArtworkForApp(Number(appid), r.data, r.ext, STEAM_TYPE[kind]); });
       }, 20000);
     }).then(function () {
       Framey.toast(S.doneLive, 4000);
@@ -434,15 +589,138 @@ function tile(it) {
   return t;
 }
 
+// ---- search by name -------------------------------------------------------
+
+function offerSearch() {
+  if (st.sr.open) return;
+  st.sr.open = true;
+  if (st.sr.term.trim().length >= 2 && st.sr.results === null) runSearch();
+}
+
+function runSearch() {
+  const sr = st.sr, term = String(sr.term || "").trim();
+  if (term.length < 2) return;
+  const token = ++st.srReq;
+  sr.loading = true;
+  sr.err = "";
+  draw();
+  api("search", { term: term }).then(function (r) {
+    if (token !== st.srReq) return;
+    sr.results = r.results || [];
+    sr.used = r.term || term;
+  }).catch(function (e) {
+    if (token !== st.srReq) return;
+    sr.results = [];
+    sr.err = errText(e);
+  }).then(function () {
+    if (token !== st.srReq) return;
+    sr.loading = false;
+    draw();
+  });
+}
+
+function assignGame(g) {
+  if (st.busy) return;
+  st.busy = true;
+  api("assign", { appid: st.appid, gid: g.id, name: g.name }).then(function () {
+    st.unknown = false;
+    st.mapped = { gid: g.id, name: g.name };
+    st.dirtyHome = true;
+    st.sr.open = false;
+    st.sr.results = null;
+    st.items = null;
+    st.page = 0;
+    st.listErr = "";
+    Framey.toast(S.assigned, 2500);
+    loadItems();
+  }).catch(function (e) {
+    Framey.toast(S.failed + errText(e), 4000);
+  }).then(function () {
+    st.busy = false;
+    draw();
+  });
+}
+
+function forgetMatch() {
+  const wasUnknown = st.unknown;
+  api("forget", { appid: st.appid }).then(function () {
+    st.mapped = null;
+    Framey.toast(S.forgotDone, 2500);
+    if (wasUnknown) {            // removed from the "Unknown" list: back to the overview
+      st.appid = null;
+      st.req++;
+      st.srReq++;
+      st.status = null;
+      st.games = null;
+      st.dirtyHome = false;
+      draw();
+    } else {
+      st.dirtyHome = true;
+      st.sr.open = false;
+      switchKind(st.kind);
+    }
+  }).catch(function (e) { Framey.toast(S.failed + errText(e), 4000); });
+}
+
+function searchPanel() {
+  const sr = st.sr;
+  const box = Framey.el("padding:14px 18px;margin:12px 0;border-radius:14px;background:#262c33;", "");
+  box.appendChild(Framey.el("font-size:24px;font-weight:600;margin-bottom:4px;", S.searchTitle));
+  if (st.unknown) box.appendChild(Framey.el("font-size:18px;color:#e6c34a;margin:4px 0;", S.err.not_found));
+  box.appendChild(Framey.el("font-size:17px;color:#7d8791;", S.searchHint));
+  const inp = field(S.searchPh);
+  inp.value = sr.term;
+  inp.oninput = function () { sr.term = inp.value; };
+  box.appendChild(inp);
+  const row = Framey.el("display:flex;flex-wrap:wrap;gap:8px;", "");
+  row.appendChild(Framey.button(S.searchBtn, BTN, function () { sr.term = inp.value; runSearch(); }));
+  if (!st.unknown) row.appendChild(Framey.button(S.hide, BTN_DIM, function () { st.srReq++; sr.open = false; sr.loading = false; draw(); }));
+  if (st.unknown) row.appendChild(Framey.button(S.removeUnknown, BTN_DIM, forgetMatch));
+  box.appendChild(row);
+  if (sr.loading) box.appendChild(Framey.el("font-size:20px;color:#9aa5af;margin:8px 0;", S.searching));
+  if (sr.err) box.appendChild(Framey.el("font-size:20px;color:#ff8a80;margin:8px 0;", sr.err));
+  if (sr.results && !sr.loading) {
+    if (!sr.results.length) {
+      box.appendChild(Framey.el("font-size:20px;color:#9aa5af;margin:8px 0;", S.noMatches));
+    } else {
+      box.appendChild(Framey.el("font-size:22px;font-weight:600;margin:12px 0 4px;", S.suggestions));
+      if (sr.used && sr.used.toLowerCase() !== String(sr.term).trim().toLowerCase()) {
+        box.appendChild(Framey.el("font-size:16px;color:#7d8791;", S.searchedFor + ": " + sr.used));
+      }
+      sr.results.forEach(function (g) {
+        const r = Framey.el("padding:14px 18px;margin:8px 0;border-radius:12px;background:#2a3138;font-size:22px;cursor:pointer;",
+          (g.verified ? "✓ " : "") + g.name);
+        r.onclick = function () { assignGame(g); };
+        box.appendChild(r);
+      });
+    }
+  }
+  return box;
+}
+
 function detailView() {
   const w = Framey.el("padding:8px;color:#e6e9ec;");
   w.appendChild(Framey.button(S.back, BTN_DIM, function () {
     st.appid = null;
     st.req++;
+    st.srReq++;
     st.loading = false;
+    if (st.dirtyHome) { st.dirtyHome = false; st.status = null; st.games = null; }
     draw();
   }));
   w.appendChild(Framey.el("font-size:30px;font-weight:600;margin:10px 0;", st.name));
+  if (st.mapped) w.appendChild(Framey.el("font-size:18px;color:#9aa5af;", S.mappedTo + ": " + st.mapped.name));
+  const acts = Framey.el("display:flex;flex-wrap:wrap;gap:8px;", "");
+  if (!st.sr.open) {
+    acts.appendChild(Framey.button(S.searchOther, BTN_DIM, function () {
+      st.sr.open = true;
+      if (!st.sr.term) st.sr.term = st.localName || (st.mapped ? st.mapped.name : "");
+      draw();
+    }));
+  }
+  if (st.mapped) acts.appendChild(Framey.button(S.forget, BTN_DIM, forgetMatch));
+  if (acts.children.length) w.appendChild(acts);
+  if (st.sr.open) w.appendChild(searchPanel());
 
   const tabs = Framey.el("display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;", "");
   KINDS.forEach(function (k) {
@@ -450,7 +728,7 @@ function detailView() {
       if (k !== st.kind) switchKind(k);
     }));
   });
-  w.appendChild(tabs);
+  if (!st.unknown) w.appendChild(tabs);
 
   if (st.has[st.kind]) {
     const bar = Framey.el("display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:8px 0;", "");
@@ -470,7 +748,7 @@ function detailView() {
     w.appendChild(Framey.el("font-size:22px;color:#9aa5af;margin:10px 0;", S.loading));
     return w;
   }
-  if (!st.items.length && !st.listErr) w.appendChild(Framey.el("font-size:22px;color:#9aa5af;margin:10px 0;", S.empty));
+  if (!st.items.length && !st.listErr && !st.unknown) w.appendChild(Framey.el("font-size:22px;color:#9aa5af;margin:10px 0;", S.empty));
 
   const grid = Framey.el("display:flex;flex-wrap:wrap;gap:14px;margin:12px 0;", "");
   st.items.forEach(function (it) { grid.appendChild(tile(it)); });
@@ -489,7 +767,7 @@ function detailView() {
 
 Framey.register({
   name: "SteamGridDB",
-  short: "Artwork",
+  short: "SGDB",
   render: function (box) {
     root = box;
     st.appid = null;
