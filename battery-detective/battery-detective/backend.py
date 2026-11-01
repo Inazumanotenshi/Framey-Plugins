@@ -22,7 +22,7 @@ INTERVAL = 30        # seconds between samples
 SAVE_EVERY = 60      # seconds between disk writes (only when something changed)
 HIST_MAX = 120       # samples kept for the live chart (one hour)
 MIN_SEC = 300        # seconds of drain data before a game's numbers count as reliable
-LANGS = ("de", "en", "fr", "es", "it", "pt")
+LANGS = ("de", "en", "fr", "es", "it", "pt", "nl", "pl", "sv", "ru", "uk", "tr", "ja", "ko", "zh")
 GEN_ATTR = "_framey_battery_detective_gen"
 RE_APP = re.compile(r"SteamLaunch\s+AppId=([0-9]+)")
 SKIP = re.compile(r"^(Proton|Steam Linux Runtime|Steamworks Common)", re.I)
@@ -31,7 +31,7 @@ MY_GEN = getattr(sys, GEN_ATTR, 0) + 1
 setattr(sys, GEN_ATTR, MY_GEN)
 
 _S = {"data": None, "last": None, "cur": None, "hist": [], "dirty": False,
-      "saved": 0.0, "task": None, "lock": None}
+      "saved": 0.0, "task": None, "lock": None, "lim": None, "lim_err": None, "inhibited": False}
 _NAMES = {}
 _NAMES_T = 0.0
 
@@ -104,14 +104,105 @@ def _reading(d):
     if pct is None and wh and wh_full:
         pct = wh / wh_full * 100.0
     temp = _num(d / "temp")
+    # health = what the battery holds now compared with what it held when new
+    health = None
+    ed, cd = _num(d / "energy_full_design"), _num(d / "charge_full_design")
+    if ef and ed:
+        health = ef / ed * 100.0
+    elif cd:
+        cf = _num(d / "charge_full")
+        health = cf / cd * 100.0 if cf else None
+    if health is not None and not 20 <= health <= 130:   # firmware junk
+        health = None
+    cycles = _num(d / "cycle_count")
     return {"name": d.name, "pct": pct, "status": _rd(d / "status") or "Unknown", "watts": watts,
-            "wh": wh, "wh_full": wh_full, "temp": temp / 10.0 if temp is not None else None}
+            "wh": wh, "wh_full": wh_full, "temp": temp / 10.0 if temp is not None else None,
+            "health": min(health, 100.0) if health is not None else None,
+            "cycles": int(cycles) if cycles is not None and cycles > 0 else None}
 
 
 def _battery(want):
     supplies = _supplies()
     d = _pick(supplies, want)
     return (_reading(d) if d else None), [s.name for s in supplies]
+
+
+# ---- charge limit ("Battery Save") -----------------------------------------
+# Two kernel interfaces exist. charge_control_end_threshold makes the charger itself stop
+# at N % (works even while Framey is closed, but often resets on reboot, so we re-apply it).
+# charge_behaviour can only pause charging, so the plugin flips it while it is running.
+# Both usually need root; without write access we fall back to a reminder in the UI.
+
+THR = "charge_control_end_threshold"
+BEH = "charge_behaviour"
+
+
+def _beh_state(d):
+    txt = _rd(d / BEH)
+    if not txt:
+        return None, []
+    opts = txt.replace("[", "").replace("]", "").split()
+    m = re.search(r"\[([^\]]+)\]", txt)
+    return (m.group(1) if m else (opts[0] if len(opts) == 1 else None)), opts
+
+
+def _limit_info(d):
+    if d is None:
+        return {"mode": "none", "thr": None}
+    t, b = d / THR, d / BEH
+    thr = _num(t) if t.exists() else None
+    if t.exists() and os.access(str(t), os.W_OK):
+        return {"mode": "hw", "thr": thr}
+    cur, opts = _beh_state(d) if b.exists() else (None, [])
+    if "inhibit-charge" in opts and os.access(str(b), os.W_OK):
+        return {"mode": "soft", "thr": thr, "beh": cur}
+    if t.exists() or "inhibit-charge" in opts:
+        return {"mode": "ro", "thr": thr}
+    return {"mode": "none", "thr": None}
+
+
+def _wr(p, val):
+    with open(str(p), "w") as f:
+        f.write(str(val))
+
+
+def _enforce(want, limit):
+    """Runs in a worker thread every tick. Returns (limit info, error code or None)."""
+    d = _pick(_supplies(), want)
+    info = _limit_info(d)
+    if d is None:
+        return info, None
+    try:
+        if info["mode"] == "hw":
+            # without a limit of our own we never touch it (SteamOS may manage it itself)
+            if limit and (info["thr"] is None or int(info["thr"]) != limit):
+                _wr(d / THR, limit)
+                info["thr"] = limit
+        elif info["mode"] == "soft":
+            pct = _num(d / "capacity")
+            beh = info.get("beh")
+            if limit and pct is not None and pct >= limit and beh != "inhibit-charge":
+                _wr(d / BEH, "inhibit-charge")
+                _S["inhibited"] = True
+            elif beh == "inhibit-charge" and _S["inhibited"] and (not limit or (pct is not None and pct <= limit - 3)):
+                _wr(d / BEH, "auto")          # only undo what we set ourselves
+                _S["inhibited"] = False
+    except OSError:
+        return info, "write"
+    return info, None
+
+
+def _release(want):
+    """Limit switched off: give the charger back its full range once."""
+    d = _pick(_supplies(), want)
+    info = _limit_info(d)
+    if d is None:
+        return
+    if info["mode"] == "hw" and info["thr"] is not None and int(info["thr"]) < 100:
+        _wr(d / THR, 100)
+    elif info["mode"] == "soft" and _S["inhibited"]:
+        _wr(d / BEH, "auto")
+        _S["inhibited"] = False
 
 
 # ---- Steam ----------------------------------------------------------------
@@ -243,7 +334,16 @@ def _game(key):
 
 # ---- tracking -------------------------------------------------------------
 
-def _apply(rd, app, now):
+def _rec():
+    return _S["data"].get("rec") is not False
+
+
+def _limit():
+    v = _S["data"].get("limit")
+    return v if isinstance(v, int) and 50 <= v <= 95 else None
+
+
+def _apply(rd, app, now, rec=True):
     S = _S
     if rd is None:
         S["last"] = None
@@ -251,6 +351,11 @@ def _apply(rd, app, now):
     S["last"] = dict(rd, t=now)
     key = app or "idle"
     disch = rd["status"] == "Discharging"
+    if not rec:                 # paused: live readout keeps going, per-game stats do not
+        S["cur"] = None
+        S["hist"].append({"t": now, "pct": rd["pct"], "w": rd["watts"], "d": 1 if disch else 0})
+        del S["hist"][:-HIST_MAX]
+        return
     cur = S["cur"]
     if cur is None or cur["key"] != key:
         g = _game(key)
@@ -285,8 +390,10 @@ def _apply(rd, app, now):
 async def _tick():
     await _ensure_data()
     want = _S["data"].get("device")
-    rd, app = await _thread(_probe, want if isinstance(want, str) else None)
-    _apply(rd, app, time.time())
+    want = want if isinstance(want, str) else None
+    rd, app = await _thread(_probe, want)
+    _apply(rd, app, time.time(), _rec())
+    _S["lim"], _S["lim_err"] = await _thread(_enforce, want, _limit())
     if _S["dirty"] and time.time() - _S["saved"] >= SAVE_EVERY:
         await _save()
 
@@ -339,11 +446,20 @@ async def _snapshot():
     if cur and cur["key"] != "idle":
         game = {"key": cur["key"], "name": _name(cur["key"]), "sec": now - cur["t0"], "drop": cur["drop"]}
     lang = _S["data"].get("lang")
+    lim = _S["lim"]
+    if lim is None:
+        lim = await _thread(lambda: _limit_info(_pick(_supplies(), want if isinstance(want, str) else None)))
+    limit = _limit()
+    works = lim["mode"] in ("hw", "soft") and not _S["lim_err"]
+    hit = bool(limit and rd and rd["pct"] is not None and rd["pct"] >= limit
+               and rd["status"] in ("Charging", "Full") and not works)
     return {"battery": rd, "devices": devices, "device": rd["name"] if rd else None,
             "auto": not isinstance(want, str) or want not in devices,
             "game": game, "eta": _eta(rd, cur["key"] if cur else "idle"),
             "hist": [[h["t"], h["pct"], h["w"], h["d"]] for h in _S["hist"]],
-            "lang": lang if lang in LANGS else None}
+            "lang": lang if lang in LANGS else None,
+            "rec": _rec(), "limit": limit, "lim_mode": lim["mode"], "lim_err": _S["lim_err"],
+            "limit_hit": hit}
 
 
 def _stats():
@@ -365,7 +481,14 @@ def _diag():
     items = []
     for d in _supplies():
         txt = _rd(d / "uevent") or ""
-        items.append({"name": d.name, "text": txt[:1500]})
+        extra = []
+        for f in (THR, BEH, "charge_control_start_threshold", "cycle_count", "energy_full_design", "charge_full_design"):
+            p = d / f
+            if p.exists():
+                extra.append("%s = %s%s" % (f, _rd(p), "" if os.access(str(p), os.W_OK) else "  (read-only)"))
+        if extra:
+            txt += "\n--\n" + "\n".join(extra)
+        items.append({"name": d.name, "text": txt[:2000]})
     return items
 
 
@@ -398,6 +521,35 @@ async def call(method, arg):
                 raise _Err("bad_arg")
             _S["cur"] = None
             await _save()
+            return {"ok": True}
+        if method == "set_rec":
+            on = arg.get("on") if isinstance(arg, dict) else None
+            if not isinstance(on, bool):
+                raise _Err("bad_arg")
+            _S["data"]["rec"] = on
+            _S["cur"] = None          # resume starts a fresh session instead of bridging the pause
+            await _save()
+            return {"ok": True, "rec": on}
+        if method == "set_limit":
+            v = arg.get("limit") if isinstance(arg, dict) else None
+            if v == 0:
+                _S["data"].pop("limit", None)
+            elif isinstance(v, int) and 50 <= v <= 95:
+                _S["data"]["limit"] = v
+            else:
+                raise _Err("bad_arg")
+            await _save()
+            want = _S["data"].get("device")
+            want = want if isinstance(want, str) else None
+            try:
+                if v == 0:
+                    await _thread(_release, want)
+                    _S["lim_err"] = None
+                    _S["lim"] = await _thread(lambda: _limit_info(_pick(_supplies(), want)))
+                else:
+                    _S["lim"], _S["lim_err"] = await _thread(_enforce, want, v)
+            except OSError:
+                _S["lim_err"] = "write"
             return {"ok": True}
         if method == "reset":
             _S["data"]["games"] = {}
