@@ -30,8 +30,6 @@ Find out which games drain your **Steam Frame** battery the fastest. Battery Det
    * Copy the `battery-detective` folder into the Framey `plugins/` directory.
    * Open the Framey settings and select **Reload**.
 
-**Updating from 0.1.0:** Install the new version the same way. Your recorded statistics are kept.
-
 ## 🚀 How to Use
 
 1. Open the SteamVR Dashboard on the Steam Frame.
