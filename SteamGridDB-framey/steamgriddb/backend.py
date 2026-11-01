@@ -666,6 +666,210 @@ def _fetch(url):
     return {"data": base64.b64encode(data).decode("ascii"), "ext": ext}
 
 
+# ---- icons: Steam does not take them through SetCustomArtworkForApp -------------
+# Same approach as the Decky plugin: normal games get the icon file written over Steam's cached icon,
+# non-Steam shortcuts get their "icon" entry in shortcuts.vdf pointed at a file in the grid folder.
+
+def _vdf_load(data):
+    """Binary VDF -> dict (keys keep their case, int stays int, str stays str, map becomes dict)."""
+    pos, n = 0, len(data)
+
+    def cstr():
+        nonlocal pos
+        e = data.find(b"\0", pos)
+        if e < 0:
+            raise ValueError("bad vdf")
+        s = data[pos:e].decode("utf-8", "surrogateescape")
+        pos = e + 1
+        return s
+
+    def node(depth):
+        nonlocal pos
+        res = {}
+        while pos < n:
+            t = data[pos]
+            pos += 1
+            if t == 8:
+                return res
+            k = cstr()
+            if t == 0:
+                if depth > 6:
+                    raise ValueError("too deep")
+                res[k] = node(depth + 1)
+            elif t == 1:
+                res[k] = cstr()
+            elif t == 2:
+                if pos + 4 > n:
+                    raise ValueError("short")
+                res[k] = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+            else:
+                raise ValueError("unsupported type")
+        return res
+    return node(0)
+
+
+def _vdf_dump(d):
+    out = bytearray()
+
+    def w(m):
+        for k, v in m.items():
+            kb = k.encode("utf-8", "surrogateescape") + b"\0"
+            if isinstance(v, dict):
+                out.extend(b"\x00" + kb)
+                w(v)
+                out.extend(b"\x08")
+            elif isinstance(v, int):
+                out.extend(b"\x02" + kb + struct.pack("<I", v & 0xFFFFFFFF))
+            else:
+                out.extend(b"\x01" + kb + str(v).encode("utf-8", "surrogateescape") + b"\0")
+    w(d)
+    out.extend(b"\x08")
+    return bytes(out)
+
+
+def _sc_key(v):
+    name = v.get("AppName") if isinstance(v.get("AppName"), str) else v.get("appname", "")
+    exe = v.get("Exe") if isinstance(v.get("Exe"), str) else v.get("exe", "")
+    aid = v.get("appid")
+    if not isinstance(aid, int):
+        aid = zlib.crc32((str(exe) + str(name)).encode("utf-8", "surrogateescape")) & 0xFFFFFFFF
+    return str((aid & 0xFFFFFFFF) | 0x80000000), str(name)
+
+
+def _sc_set_icon(appid, path):
+    """Point a shortcut's icon at path ('' clears it). Returns (changed, display name)."""
+    root = _steam_root()
+    if root is None:
+        raise _Err("no_steam")
+    for u in sorted((root / "userdata").iterdir()):
+        f = u / "config" / "shortcuts.vdf"
+        if not (u.name.isdigit() and u.name != "0" and f.is_file()):
+            continue
+        try:
+            raw = f.read_bytes()
+            d = _vdf_load(raw)
+        except (OSError, ValueError):
+            continue
+        top = d.get("shortcuts")
+        if not isinstance(top, dict):
+            continue
+        for v in top.values():
+            if not isinstance(v, dict):
+                continue
+            aid, name = _sc_key(v)
+            if aid != appid and str(int(aid) & 0xFFFFFFFF) != appid:
+                continue
+            key = next((k for k in v if k.lower() == "icon"), "icon")
+            if v.get(key, "") == path:
+                return False, name
+            v[key] = path
+            new = _vdf_dump(d)
+            if _vdf_dump(_vdf_load(new)) != new:      # never write something we cannot read back
+                raise _Err("io")
+            bak = f.with_name("shortcuts.vdf.sgdb-backup")
+            if not bak.exists():
+                bak.write_bytes(raw)
+            tmp = f.with_name("shortcuts.vdf.sgdb-tmp")
+            tmp.write_bytes(new)
+            os.replace(str(tmp), str(f))
+            return True, name
+    raise _Err("not_found")
+
+
+EXPR_INFO = ('(function(){try{var s=window.appStore;var o=s&&s.GetAppOverviewByAppID(%d);if(!o)return "none";'
+             'return JSON.stringify({hash:o.icon_hash||"",sc:!!(o.BIsShortcut&&o.BIsShortcut()),name:o.display_name||"",'
+             'url:(s.GetIconURLForApp?s.GetIconURLForApp(o):"")})}catch(e){return "error:"+String(e&&e.message||e)}})()')
+EXPR_RENAME = ('(async()=>{try{await window.SteamClient.Apps.SetShortcutName(%d,%s);return "ok"}'
+               'catch(e){return "error:"+String(e&&e.message||e)}})()')
+
+
+def _cdp_info(appid):
+    """Icon hash / icon URL of an app from Steam's main page (None when that page is not reachable)."""
+    try:
+        port, path = _cdp_target()
+        ws = _WS(port, path)
+        try:
+            res = _eval(ws, 1, EXPR_INFO % int(appid))
+        finally:
+            ws.close()
+        info = json.loads(res)
+        return info if isinstance(info, dict) else None
+    except (_Err, OSError, ValueError, TypeError):
+        return None
+
+
+def _cdp_rename(appid, name):
+    try:
+        port, path = _cdp_target()
+        ws = _WS(port, path)
+        try:
+            _eval(ws, 1, EXPR_RENAME % (int(appid), json.dumps(name)))
+        finally:
+            ws.close()
+    except (_Err, OSError, ValueError):
+        pass
+
+
+def _icon_cache_target(appid, info):
+    root = _steam_root()
+    if root is None:
+        raise _Err("no_steam")
+    sub = root / "appcache" / "librarycache" / appid
+    h = info.get("hash") if isinstance(info, dict) else ""
+    if not (isinstance(h, str) and re.fullmatch(r"[0-9a-f]{40}", h)):
+        h = ""
+        try:                                  # Steam's own icon is the 40-character file in the app's folder
+            cands = [f for f in sub.iterdir() if re.fullmatch(r"[0-9a-f]{40}\.jpg", f.name)]
+            if cands:
+                h = sorted(cands, key=lambda f: f.stat().st_size)[0].name[:-4]
+        except OSError:
+            pass
+    if not h:
+        raise _Err("no_icon_hash")
+    return sub, sub / (h + ".jpg")
+
+
+def _write_over(sub, target, data):
+    sub.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + "_temp")      # temp file first, Steam undoes direct writes
+    tmp.write_bytes(data)
+    os.replace(str(tmp), str(target))
+
+
+def _icon_apply(appid, url):
+    data = _get(url, {"User-Agent": UA}, MAX_IMG)
+    ext = "ico" if data[:4] == b"\0\0\1\0" else _sniff(data)
+    if ext is None:
+        raise _Err("bad_image")
+    if appid in _shortcuts():
+        grid = _grid_dir()
+        f = grid / ("%s_icon.%s" % (appid, ext))
+        tmp = f.with_name(".framey-" + f.name + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(str(tmp), str(f))
+        changed, name = _sc_set_icon(appid, str(f))
+        if not changed:
+            _cdp_rename(appid, name)             # same path: renaming makes Steam read the icon again
+        return {"ok": True, "restart": changed}
+    sub, target = _icon_cache_target(appid, _cdp_info(appid))
+    _write_over(sub, target, data)
+    return {"ok": True, "restart": False}
+
+
+def _icon_reset(appid):
+    if appid in _shortcuts():
+        changed, _name = _sc_set_icon(appid, "")
+        return {"ok": True, "restart": changed}
+    info = _cdp_info(appid)
+    url = info.get("url") if isinstance(info, dict) else ""
+    if not (isinstance(url, str) and url.startswith("https://")):
+        raise _Err("no_target")
+    sub, target = _icon_cache_target(appid, info)
+    _write_over(sub, target, _get(url, {"User-Agent": UA}, MAX_IMG))
+    return {"ok": True, "restart": False}
+
+
 # ---- instant refresh through Steam's own page ------------------------------
 # The Framey panel lives in SteamVR's page, which has no SteamClient.Apps. Steam's main page
 # ("SharedJSContext") does, and it is reachable on the local debug port. We talk to it with a
@@ -955,6 +1159,15 @@ async def call(method, arg):
             if not (isinstance(url, str) and _host_ok(url)):
                 raise _Err("bad_url")
             return await _run(_apply, appid, kind, url)
+        if method == "icon_apply":
+            appid, _k = _target({"appid": arg.get("appid") if isinstance(arg, dict) else None, "kind": "icon"})
+            url = arg.get("url")
+            if not (isinstance(url, str) and _host_ok(url)):
+                raise _Err("bad_url")
+            return await _run(_icon_apply, appid, url)
+        if method == "icon_reset":
+            appid, _k = _target({"appid": arg.get("appid") if isinstance(arg, dict) else None, "kind": "icon"})
+            return await _run(_icon_reset, appid)
         if method == "cdp_apply":
             appid, kind = _target(arg)
             url = arg.get("url")

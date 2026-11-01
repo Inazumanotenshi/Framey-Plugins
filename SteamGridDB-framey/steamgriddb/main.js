@@ -598,7 +598,10 @@ function applyItem(it) {
     return api("apply", { appid: appid, kind: kind, url: it.url }).then(function () { Framey.toast(S.done, 6000); });
   };
   let job;
-  if (apps && typeof apps.SetCustomArtworkForApp === "function") {
+  if (kind === "icon") {
+    // Icons are not set through Steam's artwork call; the backend writes them the way Steam stores icons
+    job = api("icon_apply", { appid: appid, url: it.url }).then(function () { Framey.toast(S.done, 6000); });
+  } else if (apps && typeof apps.SetCustomArtworkForApp === "function") {
     job = api("fetch", { url: it.url }).then(function (r) {
       return attempt(function () {
         // Steam ignores a new image while a custom one exists: clear the old one first.
@@ -640,6 +643,7 @@ function applyItem(it) {
 }
 
 function resetItem(appid, kind) {
+  if (kind === "icon") return api("icon_reset", { appid: appid });
   const apps = steamApps();
   const live = apps && typeof apps.ClearCustomArtworkForApp === "function"
     ? attempt(function () { return apps.ClearCustomArtworkForApp(Number(appid), STEAM_TYPE[kind]); }, 10000).catch(function () {})
