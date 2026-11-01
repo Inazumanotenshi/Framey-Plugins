@@ -6,9 +6,6 @@ A modified version of the popular [SteamGridDB](https://www.steamgriddb.com/) pl
 
 This plugin allows you to seamlessly customize and swap game artwork (capsules, headers, hero images, logos, and icons) directly on your Steam Frame using the SteamGridDB database.
 
-![Setting an icon](sgdb-animation.gif)
-
-*Icons in the preview: images from SteamGridDB, credit goes to their authors*
 
 ## 📸 Features
 
