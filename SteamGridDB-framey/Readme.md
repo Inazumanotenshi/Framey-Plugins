@@ -21,6 +21,9 @@ This plugin allows you to seamlessly customize and swap game artwork (capsules, 
 * 🗂️ **Icons as .ico:** SteamGridDB icons in .ico format are converted automatically
 * 🌍 **6 languages:** German, English, French, Spanish, Italian and Portuguese
 
+<img width="560" height="520" alt="sgdb-animation" src="https://github.com/user-attachments/assets/4074d434-0ec3-4003-b1fc-2a642238951f" />
+
+
 ## 🛠️ Installation
 
 1. **Prerequisites:**
