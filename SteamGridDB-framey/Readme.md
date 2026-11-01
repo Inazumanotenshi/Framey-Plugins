@@ -12,6 +12,9 @@ This plugin allows you to seamlessly customize and swap game artwork (capsules, 
 * 🔍 **Integrated Search:** Search through SteamGridDB's extensive library for the perfect game artwork.
 * ⚡ **Optimized for Framey:** Tailored specifically for the architecture and navigation of the Framey Plugin Loader.
 
+<img width="560" height="520" alt="sgdb-animation" src="https://github.com/user-attachments/assets/4074d434-0ec3-4003-b1fc-2a642238951f" />
+
+
 ## 🛠️ Installation
 
 1. **Prerequisites:**
