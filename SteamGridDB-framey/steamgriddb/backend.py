@@ -431,6 +431,64 @@ def _games():
     return {"games": out}
 
 
+ICON_MAX = 4 * 1024 * 1024      # only a safety net against absurdly large files
+IMG_EXTS = ("png", "jpg", "jpeg", "webp", "ico")
+
+
+def _icon_files(appid):
+    """Possible small images for an app, best first: custom icon, Steam's cached icon, portrait cover."""
+    out = []
+    try:
+        g = _grid_dir(create=False)
+    except (_Err, OSError):
+        g = None
+    root = _steam_root()
+    lib = root / "appcache" / "librarycache" if root else None
+    sub = lib / appid if lib else None
+    if g:
+        out += [g / ("%s_icon.%s" % (appid, e)) for e in IMG_EXTS]
+    if lib:
+        out += [lib / ("%s_icon.%s" % (appid, e)) for e in IMG_EXTS]
+        try:
+            if sub.is_dir():
+                files = [f for f in sub.iterdir() if f.is_file()]
+                out += sorted((f for f in files if "icon" in f.name.lower()), key=lambda f: f.name)
+                hexed = [f for f in files if re.fullmatch(r"[0-9a-f]{40}\.(jpg|png)", f.name)]
+                def size(f):
+                    try:
+                        return f.stat().st_size
+                    except OSError:
+                        return 1 << 30
+                out += sorted(hexed, key=size)
+        except OSError:
+            pass
+    if g:
+        out += [g / ("%sp.%s" % (appid, e)) for e in IMG_EXTS]
+    if lib:
+        out += [lib / ("%s_library_600x900.%s" % (appid, e)) for e in IMG_EXTS]
+        if sub:
+            out += [sub / ("library_600x900.%s" % e) for e in IMG_EXTS]
+    return out
+
+
+def _icon_one(appid):
+    for f in _icon_files(appid):
+        try:
+            if not f.is_file() or f.stat().st_size > ICON_MAX:
+                continue
+            ext, data = _image(f.read_bytes())
+        except (OSError, _Err):
+            continue
+        if ext:
+            return "data:image/%s;base64,%s" % ("jpeg" if ext == "jpg" else ext, base64.b64encode(data).decode("ascii"))
+    return ""
+
+
+def _icons(appids):
+    """Small data-URI icons for a few apps at once ('' when nothing is cached)."""
+    return {"icons": {a: _icon_one(a) for a in appids}}
+
+
 def _status():
     lang = _load().get("lang")
     return {"has_key": bool(_key()), "steam": _steam_root() is not None,
@@ -871,6 +929,11 @@ async def call(method, arg):
             page = arg.get("page", 0)
             page = page if isinstance(page, int) and 0 <= page < 100 else 0
             return await _run(_list, appid, kind, page)
+        if method == "icons":
+            ids = arg.get("appids") if isinstance(arg, dict) else None
+            if not (isinstance(ids, list) and len(ids) <= 16 and all(isinstance(a, str) and re.fullmatch(r"[0-9]{1,10}", a) for a in ids)):
+                raise _Err("bad_arg")
+            return await _run(_icons, ids)
         if method == "search":
             term = arg.get("term") if isinstance(arg, dict) else None
             if not isinstance(term, str):

@@ -304,9 +304,76 @@ function field(ph) {
 const BTN = "padding:14px 22px;font-size:22px;border-radius:12px;background:#3d6fd6;color:#fff;margin:6px 0;";
 const BTN_DIM = "padding:14px 22px;font-size:22px;border-radius:12px;background:#3a434b;color:#fff;margin:6px 0;";
 
+// ---- animations and game icons ----------------------------------------------
+
+const ANIM_CSS = "@keyframes fyPop{0%{transform:scale(1)}40%{transform:scale(1.2)}100%{transform:scale(1)}}" +
+  "@keyframes fySpin{to{transform:rotate(360deg)}}" +
+  "@keyframes fyFade{0%{opacity:0}15%{opacity:1}75%{opacity:1}100%{opacity:0}}" +
+  "@keyframes fyIn{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}";
+const iconCache = {};
+const iconWait = {};
+let iconQ = [], iconBusy = false;
+
+function pumpIcons() {
+  if (iconBusy || !iconQ.length) return;
+  iconBusy = true;
+  const batch = iconQ.splice(0, 8);
+  api("icons", { appids: batch }).then(function (r) {
+    batch.forEach(function (a) {
+      const v = (r.icons && typeof r.icons[a] === "string") ? r.icons[a] : "";
+      iconCache[a] = v;
+      (iconWait[a] || []).forEach(function (f) { f(v); });
+      delete iconWait[a];
+    });
+  }).catch(function () {
+    batch.forEach(function (a) { delete iconWait[a]; });
+  }).then(function () {
+    iconBusy = false;
+    pumpIcons();
+  });
+}
+
+function iconEl(appid, size, pop) {
+  const box = Framey.el("flex:none;width:" + size + "px;height:" + size + "px;border-radius:" + Math.round(size / 5) +
+    "px;background:#14181c;overflow:hidden;" + (pop ? "animation:fyPop .6s ease;" : ""), "");
+  const put = function (src, cached) {
+    box.textContent = "";                 // removes the loading ring
+    if (!src) return;
+    const im = document.createElement("img");
+    im.style.cssText = "display:block;width:100%;height:100%;object-fit:cover;" + (cached ? "" : "animation:fyIn .35s ease;");
+    im.src = src;
+    box.appendChild(im);
+  };
+  if (iconCache[appid] !== undefined) {
+    put(iconCache[appid], true);
+  } else {
+    const ring = Math.max(14, Math.round(size / 3));
+    box.appendChild(Framey.el("position:relative;left:50%;top:50%;margin:-" + Math.round(ring / 2) + "px 0 0 -" + Math.round(ring / 2) +
+      "px;width:" + ring + "px;height:" + ring + "px;border-radius:50%;border:3px solid #3d6fd6;border-top-color:transparent;box-sizing:border-box;animation:fySpin .8s linear infinite;", ""));
+    (iconWait[appid] = iconWait[appid] || []).push(put);
+    if (iconQ.indexOf(appid) < 0) iconQ.push(appid);
+    pumpIcons();
+  }
+  return box;
+}
+
+function overlay(kind) {
+  const o = Framey.el("position:absolute;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;" +
+    "border-radius:10px;pointer-events:none;" + (kind === "busy" ? "background:rgba(10,14,18,.6);" : "background:rgba(40,160,90,.35);animation:fyFade 1.5s ease forwards;"), "");
+  if (kind === "busy") {
+    o.appendChild(Framey.el("width:34px;height:34px;border-radius:50%;border:4px solid #3d6fd6;border-top-color:transparent;animation:fySpin .8s linear infinite;", ""));
+  } else {
+    o.appendChild(Framey.el("width:46px;height:46px;border-radius:50%;background:#2fb36b;color:#fff;font-size:30px;line-height:46px;text-align:center;animation:fyIn .35s ease;", "✓"));
+  }
+  return o;
+}
+
 function draw() {
   if (!root) return;
   root.textContent = "";
+  const sty = document.createElement("style");
+  sty.textContent = ANIM_CSS;
+  root.appendChild(sty);
   root.appendChild(st.appid ? detailView() : homeView());
 }
 
@@ -369,9 +436,13 @@ function homeView() {
   const known = st.games.filter(function (g) { return !g.unknown; });
   const unknown = st.games.filter(function (g) { return g.unknown; });
   const addRow = function (g) {
-    const row = Framey.el("padding:16px 20px;margin:8px 0;border-radius:14px;background:" + (g.unknown ? "#2f2a38" : "#2a3138") +
-      ";font-size:24px;cursor:pointer;", g.name || S.unknownName);
-    row.appendChild(Framey.el("font-size:16px;color:#7d8791;", String(g.appid)));
+    const row = Framey.el("display:flex;align-items:center;gap:16px;padding:12px 20px;margin:8px 0;border-radius:14px;background:" +
+      (g.unknown ? "#2f2a38" : "#2a3138") + ";cursor:pointer;", "");
+    row.appendChild(iconEl(g.appid, 56, false));
+    const txt = Framey.el("flex:1;min-width:0;", "");
+    txt.appendChild(Framey.el("font-size:24px;", g.name || S.unknownName));
+    txt.appendChild(Framey.el("font-size:16px;color:#7d8791;", String(g.appid)));
+    row.appendChild(txt);
     row.onclick = function () { select(g.appid, g.name, g.unknown); };
     w.appendChild(row);
   };
@@ -518,6 +589,8 @@ function steamDiag() {
 function applyItem(it) {
   if (st.busy) return;
   st.busy = true;
+  st.applyingKey = it.url;
+  st.flash = null;
   Framey.toast(S.applying, 1500);
   const kind = st.kind, appid = st.appid;
   const apps = steamApps();
@@ -552,12 +625,18 @@ function applyItem(it) {
   }
   job.then(function () {
     st.has[kind] = true;
+    st.flash = it.url;
+    setTimeout(function () { if (st.flash === it.url) st.flash = null; }, 1800);
+    const src = it._img && it._img.src;
+    if (src && (kind === "icon" || (kind === "grid_p" && !iconCache[appid]))) iconCache[appid] = src;
   }).catch(function (e) {
     Framey.toast(S.failed + errText(e), 5000);
   }).then(function () {
     st.busy = false;
+    st.applyingKey = null;
     draw();
   });
+  draw();
 }
 
 function resetItem(appid, kind) {
@@ -571,7 +650,9 @@ function resetItem(appid, kind) {
 function tile(it) {
   const sz = SIZE[st.kind];
   const t = Framey.el("width:" + sz[0] + "px;cursor:pointer;", "");
+  const wrap = Framey.el("position:relative;width:" + sz[0] + "px;height:" + sz[1] + "px;", "");
   const img = document.createElement("img");
+  it._img = img;
   img.setAttribute("data-fy", "1");
   img.setAttribute("loading", "lazy");
   img.style.cssText = "display:block;width:" + sz[0] + "px;height:" + sz[1] +
@@ -581,7 +662,10 @@ function tile(it) {
     api("thumb", { url: it.thumb }).then(function (r) { img.src = r.data; }).catch(function () {});
   };
   img.src = it.thumb;
-  t.appendChild(img);
+  wrap.appendChild(img);
+  if (st.applyingKey === it.url) wrap.appendChild(overlay("busy"));
+  else if (st.flash === it.url) { img.style.borderColor = "#2fb36b"; wrap.appendChild(overlay("done")); }
+  t.appendChild(wrap);
   if (it.author) {
     t.appendChild(Framey.el("font-size:15px;color:#7d8791;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;", it.author));
   }
@@ -708,7 +792,10 @@ function detailView() {
     if (st.dirtyHome) { st.dirtyHome = false; st.status = null; st.games = null; }
     draw();
   }));
-  w.appendChild(Framey.el("font-size:30px;font-weight:600;margin:10px 0;", st.name));
+  const head = Framey.el("display:flex;align-items:center;gap:16px;margin:10px 0;", "");
+  head.appendChild(iconEl(st.appid, 64, !!st.flash));
+  head.appendChild(Framey.el("font-size:30px;font-weight:600;min-width:0;", st.name));
+  w.appendChild(head);
   if (st.mapped) w.appendChild(Framey.el("font-size:18px;color:#9aa5af;", S.mappedTo + ": " + st.mapped.name));
   const acts = Framey.el("display:flex;flex-wrap:wrap;gap:8px;", "");
   if (!st.sr.open) {
