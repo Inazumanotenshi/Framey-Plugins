@@ -23,6 +23,7 @@ Some Plugin Code might be AI generated. If you dont like it dont use it!
 | Battery Detective | Tracks battery usage per game, estimates remaining playtime, and records battery statistics |
 | SteamGridDB Framey | Allows to change the artworks of your installed Steam Frame apps with artworks of SteamGridDB |
 | Launch Arguments | Tap together Steam launch options (DLL overrides, SteamAppId, OSC, own building blocks) and apply them per game |
+| Frame Lights Out | Turns off the status LED on the side of the headset, with a toggle in SteamVR's Quick Settings (by [adepssimius](https://github.com/adepssimius/frame-lights-out)) |
 | More coming soon... | 🚧 |
 
 ---
