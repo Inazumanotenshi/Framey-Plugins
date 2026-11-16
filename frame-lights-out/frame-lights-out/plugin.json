@@ -1,0 +1,7 @@
+{
+  "id": "frame-lights-out",
+  "name": "Status Light",
+  "version": "1.0.1",
+  "short": "Light",
+  "description": "Turn the Steam Frame's side status LED off, with a toggle in SteamVR's Quick Settings."
+}
